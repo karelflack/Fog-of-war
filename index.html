@@ -1,0 +1,3561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fog of War — Nuclear Science Race</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #000;
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      user-select: none;
+    }
+
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+    }
+
+    /* ── HUD ─────────────────────────────────────── */
+    #hud {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 58px;
+      background: rgba(0,5,15,0.85);
+      border-bottom: 1px solid #1a4a6a;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 28px;
+      z-index: 100;
+      backdrop-filter: blur(4px);
+    }
+
+    .hud-sect { display: flex; flex-direction: column; gap: 1px; }
+
+    .hud-lbl {
+      font-size: 9px;
+      color: #4a8aaa;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+
+    .hud-val {
+      font-size: 15px;
+      color: #e8f0f8;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+    }
+
+    .hud-sub { font-size: 10px; color: #5a8aaa; }
+
+    .pbar {
+      height: 6px;
+      width: 110px;
+      background: #0a1a2a;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 2px;
+    }
+
+    .pfill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+    .pfill.player  { background: linear-gradient(90deg, #2a8a2a, #44cc44); }
+    .pfill.enemy   { background: linear-gradient(90deg, #8a2a2a, #cc4444); }
+    .pfill.assembly{ background: linear-gradient(90deg, #8a8a2a, #cccc44); }
+    .pfill.uranium { background: linear-gradient(90deg, #1a6a3a, #33bb77); }
+
+    #assembly-display { display: none; align-items: center; gap: 8px; }
+    #assembly-display.show { display: flex; }
+
+    /* ── Sidebars ────────────────────────────────── */
+    #sidebar-left {
+      position: fixed;
+      top: 58px; left: 0;
+      width: 162px; bottom: 96px;
+      background: rgba(0,5,15,0.82);
+      border-right: 1px solid #1a4a6a;
+      padding: 12px 10px;
+      z-index: 100;
+      display: flex; flex-direction: column; gap: 6px;
+      overflow-y: auto;
+    }
+
+    #sidebar-right {
+      position: fixed;
+      top: 58px; right: 0;
+      width: 176px; bottom: 96px;
+      background: rgba(0,5,15,0.82);
+      border-left: 1px solid #1a4a6a;
+      padding: 12px 10px;
+      z-index: 100;
+      display: flex; flex-direction: column; gap: 6px;
+      overflow-y: auto;
+    }
+
+    .sec-hdr {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #4a8aaa;
+      border-bottom: 1px solid #1a4a6a;
+      padding-bottom: 4px;
+      margin-top: 4px;
+      margin-bottom: 2px;
+    }
+
+    .sec-info {
+      font-size: 10px;
+      color: #4a6a7a;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+
+    /* ── Buttons ─────────────────────────────────── */
+    .btn {
+      background: #060f1a;
+      border: 1px solid #1a4a6a;
+      color: #c8d8e8;
+      padding: 7px 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 2px;
+      text-align: left;
+      width: 100%;
+      transition: background 0.12s, border-color 0.12s;
+      line-height: 1.4;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: #0d2a44;
+      border-color: #4a8aaa;
+    }
+
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .btn.active {
+      background: #0d2a44;
+      border-color: #44cc44;
+      color: #44cc44;
+    }
+
+    .btn.assembly-btn {
+      background: #1a1a06;
+      border-color: #aaaa44;
+      color: #dddd44;
+      font-weight: bold;
+      text-align: center;
+      letter-spacing: 1px;
+      padding: 10px;
+      animation: pulse-border 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-border {
+      0%,100% { box-shadow: 0 0 0 0 rgba(204,204,68,0); }
+      50%      { box-shadow: 0 0 8px 2px rgba(204,204,68,0.35); }
+    }
+
+    .cost-tag { font-size: 10px; color: #4a8aaa; }
+
+    /* ── Event Log ───────────────────────────────── */
+    #event-log {
+      position: fixed;
+      bottom: 0; left: 162px; right: 176px;
+      height: 96px;
+      background: rgba(0,5,15,0.82);
+      border-top: 1px solid #1a4a6a;
+      padding: 6px 12px;
+      z-index: 100;
+      overflow-y: auto;
+      display: flex; flex-direction: column-reverse; gap: 1px;
+    }
+
+    .log-line { font-size: 10px; color: #5a7a8a; padding: 1px 0; }
+    .log-line.imp     { color: #7aaacc; }
+    .log-line.warn    { color: #cc8844; }
+    .log-line.ok      { color: #44cc88; }
+    .log-line.danger  { color: #cc4444; }
+
+    /* ── Context Menu ────────────────────────────── */
+    #ctx-menu {
+      position: fixed;
+      background: rgba(3,10,20,0.97);
+      border: 1px solid #1a4a6a;
+      border-radius: 3px;
+      padding: 4px;
+      z-index: 200;
+      display: none;
+      min-width: 192px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.9);
+    }
+
+    .ctx-hdr {
+      padding: 4px 8px;
+      font-size: 9px;
+      color: #4a8aaa;
+      border-bottom: 1px solid #1a3a5a;
+      margin-bottom: 3px;
+    }
+
+    .ctx-row {
+      padding: 7px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 2px;
+      color: #c0d0e0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .ctx-row:hover { background: #0d2a44; }
+
+    .ctx-row.off {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .ctx-row.off:hover { background: none; }
+    .ctx-c { font-size: 10px; color: #4a8aaa; }
+    .ctx-div { border: none; border-top: 1px solid #1a3a5a; margin: 3px 0; }
+
+    /* ── Op items ────────────────────────────────── */
+    .op-card {
+      background: #060f1a;
+      border: 1px solid #1a3a5a;
+      border-radius: 2px;
+      padding: 5px 7px;
+      font-size: 10px;
+      color: #8aaacc;
+    }
+
+    .op-bar {
+      height: 3px;
+      background: #1a2a3a;
+      border-radius: 2px;
+      margin-top: 4px;
+    }
+
+    .op-fill {
+      height: 100%;
+      background: #4a8aaa;
+      border-radius: 2px;
+      transition: width 0.6s linear;
+    }
+
+    /* ── Targeting indicator ─────────────────────── */
+    #target-ind {
+      position: fixed;
+      bottom: 106px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(10,60,100,0.5);
+      border: 1px solid #4a8aaa;
+      padding: 7px 22px;
+      font-size: 12px;
+      color: #44ccaa;
+      border-radius: 3px;
+      z-index: 150;
+      display: none;
+      letter-spacing: 0.5px;
+    }
+
+    #target-ind.show { display: block; }
+
+    /* ── Notification toast ──────────────────────── */
+    #notif {
+      position: fixed;
+      top: 68px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,10,25,0.95);
+      border: 1px solid #4a8aaa;
+      padding: 7px 22px;
+      font-size: 12px;
+      color: #e0e8f0;
+      border-radius: 3px;
+      z-index: 200;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    /* ── Game Over ───────────────────────────────── */
+    #game-over {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88);
+      display: none;
+      align-items: center; justify-content: center;
+      z-index: 300;
+      flex-direction: column;
+      gap: 18px;
+      text-align: center;
+    }
+
+    #game-over.show { display: flex; }
+
+    #game-over h1 {
+      font-size: 52px;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+    }
+
+    #game-over.victory h1 { color: #44cc88; text-shadow: 0 0 30px rgba(68,204,136,0.5); }
+    #game-over.defeat h1  { color: #cc4444; text-shadow: 0 0 30px rgba(204,68,68,0.5); }
+
+    #game-over p { color: #7a9aaa; font-size: 14px; max-width: 420px; line-height: 1.6; }
+
+    #game-over .restart-btn {
+      margin-top: 8px;
+      padding: 12px 40px;
+      font-size: 13px;
+      letter-spacing: 2px;
+      text-align: center;
+      width: auto;
+    }
+
+    #game-over .show-results-btn {
+      padding: 10px 32px;
+      font-size: 12px;
+      letter-spacing: 2px;
+      text-align: center;
+      width: auto;
+      color: #7aaacc;
+      border-color: #2a5a7a;
+    }
+
+    #game-over .btn-row {
+      display: flex; gap: 12px; justify-content: center;
+    }
+
+    /* Small floating pill shown when game-over overlay is hidden */
+    #results-pill {
+      position: fixed;
+      bottom: 108px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      gap: 10px;
+      z-index: 200;
+    }
+
+    #results-pill.show { display: flex; }
+
+    #results-pill button {
+      padding: 8px 22px;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      width: auto;
+    }
+
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-track { background: #060f1a; }
+    ::-webkit-scrollbar-thumb { background: #1a4a6a; border-radius: 2px; }
+
+    /* ── Nation select screen ────────────────────────── */
+    #nation-screen {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at 50% 40%, #0c1f38 0%, #040c18 100%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 500; gap: 36px;
+    }
+
+    #nation-screen .ns-eyebrow {
+      font-size: 10px; letter-spacing: 4px;
+      color: #3a6a8a; text-transform: uppercase;
+    }
+
+    #nation-screen .ns-title {
+      font-size: 36px; letter-spacing: 7px;
+      color: #d0dce8; text-transform: uppercase;
+      text-align: center; line-height: 1.2;
+    }
+
+    #nation-screen .ns-subtitle {
+      font-size: 11px; letter-spacing: 2px;
+      color: #3a6a8a; text-transform: uppercase;
+    }
+
+    .nation-cards { display: flex; gap: 28px; }
+
+    .nation-card {
+      width: 188px; padding: 30px 20px 24px;
+      background: rgba(2,8,18,0.85);
+      border: 1px solid #1a3a5a; border-radius: 3px;
+      cursor: pointer; text-align: center;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 10px;
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+    }
+
+    .nation-card:hover {
+      border-color: #4a8aaa; background: rgba(8,25,50,0.9);
+      box-shadow: 0 0 28px rgba(74,138,170,0.18);
+    }
+
+    .nc-flag  { font-size: 44px; line-height: 1; }
+    .nc-name  { font-size: 16px; letter-spacing: 3px; font-weight: bold; margin-top: 4px; }
+    .nc-bonus { font-size: 10px; color: #3a7a9a; line-height: 1.6; letter-spacing: 0.5px; margin-top: 2px; }
+    .nc-sep   { width: 40px; height: 1px; background: #1a3a5a; }
+
+    .nation-card.usa   .nc-name { color: #4a7acc; }
+    .nation-card.russia .nc-name { color: #cc5a5a; }
+    .nation-card.usa:hover   .nc-bonus,
+    .nation-card.russia:hover .nc-bonus { color: #6aaabb; }
+
+    /* ── Main Menu ───────────────────────────────────── */
+    #main-menu {
+      position: fixed; inset: 0;
+      background: rgba(0,3,10,0.80);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column;
+      z-index: 500;
+    }
+
+    .mm-scanlines {
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px, transparent 3px,
+        rgba(0,0,0,0.18) 3px, rgba(0,0,0,0.18) 4px
+      );
+      pointer-events: none; z-index: 1;
+    }
+
+    .mm-content {
+      position: relative; z-index: 2;
+      display: flex; flex-direction: column;
+      align-items: center; text-align: center;
+    }
+
+    .mm-eyebrow {
+      font-size: 10px; letter-spacing: 6px;
+      color: #cc4444; text-transform: uppercase;
+      margin-bottom: 32px;
+      animation: blink-slow 3s ease-in-out infinite;
+    }
+
+    .mm-title {
+      font-size: 68px; letter-spacing: 16px;
+      color: #d0e0ef; font-weight: bold;
+      text-transform: uppercase; line-height: 1;
+      animation: glitch-title 7s ease-in-out infinite;
+      text-shadow: 0 0 60px rgba(60,120,200,0.25);
+      margin-bottom: 14px;
+    }
+
+    .mm-subtitle {
+      font-size: 11px; letter-spacing: 6px;
+      color: #2a5a78; text-transform: uppercase;
+      margin-bottom: 52px;
+    }
+
+    .mm-divider {
+      width: 200px; height: 1px;
+      background: linear-gradient(90deg, transparent, #1a4a6a, transparent);
+      margin-bottom: 48px;
+    }
+
+    .mm-nav {
+      display: flex; flex-direction: column; gap: 2px;
+      align-items: flex-start; min-width: 240px;
+    }
+
+    .mm-item {
+      font-size: 13px; letter-spacing: 4px;
+      color: #4a7a9a; cursor: pointer;
+      padding: 11px 18px;
+      border-left: 2px solid transparent;
+      transition: color 0.14s, border-color 0.14s, padding-left 0.14s;
+      position: relative; width: 100%;
+      text-transform: uppercase;
+    }
+
+    .mm-item::before {
+      content: '> ';
+      color: #44ccaa; opacity: 0;
+      transition: opacity 0.12s;
+    }
+
+    .mm-item:hover { color: #c0d8e8; border-left-color: #44ccaa; padding-left: 26px; }
+    .mm-item:hover::before { opacity: 1; }
+
+    .mm-footer {
+      position: fixed; bottom: 20px;
+      left: 50%; transform: translateX(-50%);
+      font-size: 9px; letter-spacing: 5px;
+      color: #162a38; text-transform: uppercase;
+      white-space: nowrap; z-index: 2;
+    }
+
+    @keyframes glitch-title {
+      0%, 82%, 100% { text-shadow: 0 0 60px rgba(60,120,200,0.25); transform: none; color: #d0e0ef; }
+      84% { transform: translate(-2px,0); text-shadow:  3px 0 #ff2222, -3px 0 #2244ff; }
+      86% { transform: translate( 2px,0); text-shadow: -2px 0 #ff2222,  2px 0 #2244ff; }
+      88% { transform: none; text-shadow: 0 0 60px rgba(60,120,200,0.25); }
+      90% { transform: translate(-1px,0.5px); color: #e8f4ff; text-shadow: 1px 0 #ff5555, -1px 0 #5566ff; }
+      92% { transform: none; color: #d0e0ef; text-shadow: 0 0 60px rgba(60,120,200,0.25); }
+    }
+
+    @keyframes blink-slow {
+      0%, 100% { opacity: 1; }
+      46%, 54%  { opacity: 0; }
+    }
+
+    /* ── Full-screen overlays (Help & Settings) ──────── */
+    .fs-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,3,10,0.97);
+      z-index: 600;
+      display: flex; flex-direction: column;
+      align-items: center; overflow-y: auto;
+      padding: 72px 24px 80px;
+    }
+
+    .fs-back {
+      position: fixed; top: 20px; left: 24px;
+      font-size: 11px; letter-spacing: 2px;
+      color: #3a7a9a; cursor: pointer;
+      border: 1px solid #1a3a5a;
+      padding: 7px 16px; border-radius: 2px;
+      transition: color 0.12s, border-color 0.12s;
+      z-index: 10; background: rgba(0,5,15,0.8);
+    }
+
+    .fs-back:hover { color: #88ccee; border-color: #4a8aaa; }
+
+    .fs-title {
+      font-size: 10px; letter-spacing: 7px;
+      color: #2a5a78; text-transform: uppercase;
+      margin-bottom: 40px;
+    }
+
+    .fs-body {
+      max-width: 620px; width: 100%;
+      display: flex; flex-direction: column; gap: 32px;
+    }
+
+    .fs-section-hdr {
+      font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
+      color: #4a8aaa; border-bottom: 1px solid #0e2030;
+      padding-bottom: 6px; margin-bottom: 10px;
+    }
+
+    .fs-section p { font-size: 12px; color: #6a8a9a; line-height: 1.8; margin: 0; }
+
+    .fs-section ul {
+      padding-left: 0; list-style: none; margin: 0;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+
+    .fs-section li {
+      font-size: 12px; color: #6a8a9a; line-height: 1.7;
+      padding-left: 14px; position: relative;
+    }
+
+    .fs-section li::before { content: '—'; position: absolute; left: 0; color: #2a5a78; }
+    .fs-section b { color: #8aaabb; font-weight: bold; }
+
+    /* Settings controls */
+    .setting-row {
+      display: flex; flex-direction: column; gap: 10px;
+      padding-bottom: 28px; border-bottom: 1px solid #0a1822;
+    }
+
+    .setting-row:last-child { border-bottom: none; padding-bottom: 0; }
+
+    .setting-lbl {
+      font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: #4a8aaa;
+    }
+
+    .setting-opts { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .sopt {
+      padding: 8px 18px; font-size: 11px; letter-spacing: 2px;
+      background: #050d18; border: 1px solid #112030;
+      color: #3a6a7a; cursor: pointer; border-radius: 2px;
+      font-family: 'Courier New', monospace; text-transform: uppercase;
+      transition: all 0.12s;
+    }
+
+    .sopt:hover { border-color: #2a5a7a; color: #7aaabb; }
+    .sopt.active { background: #071a2a; border-color: #44ccaa; color: #44ccaa; }
+
+    .setting-desc {
+      font-size: 10px; color: #2a4a58; line-height: 1.5;
+      font-style: italic; min-height: 16px;
+    }
+
+    /* ── Multiplayer screen ────────────────────────── */
+    #mp-join-input {
+      background: #050d18; border: 1px solid #1a3a5a;
+      color: #c0d0e0; font-family: 'Courier New', monospace;
+      font-size: 20px; letter-spacing: 8px;
+      padding: 10px 16px; border-radius: 2px;
+      width: 190px; text-transform: uppercase;
+      transition: border-color 0.12s;
+    }
+    #mp-join-input:focus { outline: none; border-color: #44ccaa; }
+    #mp-join-input::placeholder { color: #1a3a5a; letter-spacing: 4px; }
+
+    #mp-room-code {
+      font-size: 44px; letter-spacing: 16px;
+      color: #44ccaa; font-weight: bold;
+      text-shadow: 0 0 20px rgba(68,204,170,0.3);
+    }
+
+    .mp-status {
+      font-size: 11px; letter-spacing: 1.5px; color: #4a8aaa;
+      padding: 10px 0; border-left: 2px solid #1a4a6a;
+      padding-left: 14px;
+    }
+
+    .mp-btn {
+      padding: 10px 28px; font-size: 12px; letter-spacing: 2px;
+      text-align: center; width: auto;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════ MAIN MENU ═══════════ -->
+<div id="main-menu">
+  <div class="mm-scanlines"></div>
+  <div class="mm-content">
+    <div class="mm-eyebrow">☢ — classified — ☢</div>
+    <div class="mm-title">Fog of War</div>
+    <div class="mm-subtitle">Nuclear Science Race</div>
+    <div class="mm-divider"></div>
+    <nav class="mm-nav">
+      <div class="mm-item" onclick="showNationSelect()">Start Game</div>
+      <div class="mm-item" onclick="showMp()">Multiplayer</div>
+      <div class="mm-item" onclick="showHelp()">Help</div>
+      <div class="mm-item" onclick="showSettings()">Settings</div>
+    </nav>
+  </div>
+  <div class="mm-footer">Top Secret · TS/SCI · 1962</div>
+</div>
+
+<!-- ═══════════ HELP SCREEN ═══════════ -->
+<div id="help-screen" class="fs-overlay" style="display:none">
+  <div class="fs-back" onclick="showMainMenu()">← Back</div>
+  <div class="fs-title">How to Play</div>
+  <div class="fs-body">
+
+    <div class="fs-section">
+      <div class="fs-section-hdr">Objective</div>
+      <p>Race the AI to complete a nuclear weapon. You need three things: <b>100% science</b>, <b>100% depleted uranium</b>, and a <b>rocket silo</b> placed on the map. When all three are ready, initiate assembly — a 4-minute countdown. On completion your ICBM launches toward the enemy capital. First to launch wins.</p>
+    </div>
+
+    <div class="fs-section">
+      <div class="fs-section-hdr">Structures — left sidebar</div>
+      <ul>
+        <li><b>Lab (500c)</b> — Generates science over time. Place several across different regions. Can be sabotaged and temporarily disabled.</li>
+        <li><b>Reactor (700c)</b> — Generates depleted uranium. Build multiple — uranium takes time to fill. Can be found and permanently destroyed.</li>
+        <li><b>Rocket Silo (1200c)</b> — Required to launch. Only one can be built. A prime sabotage target — hide it or protect it with jammers.</li>
+        <li><b>Jammer (600c)</b> — Dual-purpose: near your labs it penalises enemy operations (−28% success). Near enemy labs it slows their science by 50%. Enemy jammers are hidden until swept or reconed.</li>
+      </ul>
+    </div>
+
+    <div class="fs-section">
+      <div class="fs-section-hdr">Operations — right sidebar</div>
+      <ul>
+        <li><b>RECON (300c · 45s)</b> — Scans a radius around your click. Reveals enemy labs, jammers, reactors, and silos in range.</li>
+        <li><b>STEAL (500c · 70s)</b> — Targets a known or estimated enemy region. On success, transfers a portion of their science to you.</li>
+        <li><b>SABOTAGE (700c · 100s)</b> — Click near a revealed enemy structure. Permanently destroys jammers, reactors, and silos. Disables labs for 2 minutes.</li>
+      </ul>
+    </div>
+
+    <div class="fs-section">
+      <div class="fs-section-hdr">Counter-Intel</div>
+      <ul>
+        <li><b>SWEEP (1500c)</b> — All your labs simultaneously scan their surrounding area. Reveals hidden enemy jammers, reactors, and silos so you can target them with SABOTAGE.</li>
+        <li>Your own jammers are always visible. Enemy jammers must be located first via RECON or SWEEP before you can destroy them.</li>
+      </ul>
+    </div>
+
+    <div class="fs-section">
+      <div class="fs-section-hdr">Tips</div>
+      <ul>
+        <li>Build 2–3 reactors early — uranium takes a long time to fill from zero.</li>
+        <li>Place your silo in a remote region to delay enemy detection.</li>
+        <li>Surround your labs and silo with jammers to hamper enemy operations.</li>
+        <li>If you find the enemy silo — SABOTAGE it immediately. Destroying it while they are assembling interrupts the countdown.</li>
+        <li>Watch the Intel panel (right sidebar) for revealed structures — it shows coordinates for SABOTAGE targeting.</li>
+        <li>On Hard difficulty the AI moves fast. Sweep early and often.</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════ SETTINGS SCREEN ═══════════ -->
+<div id="settings-screen" class="fs-overlay" style="display:none">
+  <div class="fs-back" onclick="showMainMenu()">← Back</div>
+  <div class="fs-title">Settings</div>
+  <div class="fs-body">
+
+    <div class="setting-row">
+      <div class="setting-lbl">AI Difficulty</div>
+      <div class="setting-opts">
+        <div class="sopt"        data-key="difficulty" data-val="easy"   onclick="setSetting('difficulty','easy')">Easy</div>
+        <div class="sopt active" data-key="difficulty" data-val="normal" onclick="setSetting('difficulty','normal')">Normal</div>
+        <div class="sopt"        data-key="difficulty" data-val="hard"   onclick="setSetting('difficulty','hard')">Hard</div>
+      </div>
+      <div class="setting-desc" id="desc-difficulty">Balanced — AI builds and operates at normal speed.</div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-lbl">Game Speed</div>
+      <div class="setting-opts">
+        <div class="sopt"        data-key="speed" data-val="short"  onclick="setSetting('speed','short')">Short (~8 min)</div>
+        <div class="sopt active" data-key="speed" data-val="normal" onclick="setSetting('speed','normal')">Normal (~15 min)</div>
+        <div class="sopt"        data-key="speed" data-val="long"   onclick="setSetting('speed','long')">Long (~25 min)</div>
+      </div>
+      <div class="setting-desc" id="desc-speed">Standard pacing — resources generate at normal rate.</div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-lbl">Globe Auto-Spin</div>
+      <div class="setting-opts">
+        <div class="sopt"        data-key="autoSpin" data-val="false" onclick="setSetting('autoSpin', false)">Off</div>
+        <div class="sopt active" data-key="autoSpin" data-val="true"  onclick="setSetting('autoSpin', true)">On</div>
+      </div>
+      <div class="setting-desc">Globe rotates slowly when not dragging.</div>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-lbl">Sound Effects</div>
+      <div class="setting-opts">
+        <div class="sopt"        data-key="sound" data-val="false" onclick="setSetting('sound', false)">Off</div>
+        <div class="sopt active" data-key="sound" data-val="true"  onclick="setSetting('sound', true)">On</div>
+      </div>
+      <div class="setting-desc">Synthesized audio feedback for all game events.</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════ MULTIPLAYER SCREEN ═══════════ -->
+<div id="mp-screen" class="fs-overlay" style="display:none">
+  <div class="fs-back" onclick="showMainMenu()">← Back</div>
+  <div class="fs-title">Multiplayer</div>
+  <div class="fs-body" style="gap:28px">
+
+    <!-- Create -->
+    <div class="fs-section">
+      <div class="fs-section-hdr">Create a game</div>
+      <p>Generate a room code and share it with your opponent.<br>You pick your nation; the opponent gets the other side.</p>
+      <div style="margin-top:18px">
+        <button class="btn mp-btn" onclick="mpDoHost()">⚡ CREATE GAME</button>
+      </div>
+      <div id="mp-code-display" style="display:none;margin-top:22px">
+        <div style="font-size:9px;color:#4a8aaa;letter-spacing:3px;margin-bottom:10px;text-transform:uppercase">Room Code — share this</div>
+        <div id="mp-room-code">XXXXXX</div>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div id="mp-status-row" class="mp-status" style="display:none">Idle</div>
+
+    <!-- Join -->
+    <div class="fs-section">
+      <div class="fs-section-hdr">Join a game</div>
+      <p>Enter the 6-character room code your opponent shared.</p>
+      <div style="margin-top:18px;display:flex;gap:10px;align-items:center">
+        <input id="mp-join-input" type="text" maxlength="6" placeholder="AABBCC"
+               oninput="this.value=this.value.toUpperCase()">
+        <button class="btn mp-btn" onclick="mpDoJoin()">JOIN →</button>
+      </div>
+    </div>
+
+    <!-- Info -->
+    <div class="fs-section">
+      <div class="fs-section-hdr">How it works</div>
+      <ul>
+        <li>Peer-to-peer via WebRTC — no account or server required</li>
+        <li>Both players must be online simultaneously</li>
+        <li>Host picks nation first; guest is auto-assigned the opposing side</li>
+        <li>Structures are hidden in fog of war until your opponent RECONs</li>
+        <li>AI is disabled — you race a real opponent</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<!-- Nation select screen -->
+<div id="nation-screen" style="display:none">
+  <div class="ns-eyebrow">Nuclear Science Race</div>
+  <div class="ns-title">Fog of War</div>
+  <div class="ns-subtitle">Choose your nation</div>
+  <div class="nation-cards">
+    <div class="nation-card usa" onclick="selectNation('USA')">
+      <div class="nc-flag">🇺🇸</div>
+      <div class="nc-name">U S A</div>
+      <div class="nc-sep"></div>
+      <div class="nc-bonus">Enhanced intelligence network<br>RECON success +5%</div>
+    </div>
+    <div class="nation-card russia" onclick="selectNation('RUSSIA')">
+      <div class="nc-flag">🇷🇺</div>
+      <div class="nc-name">RUSSIA</div>
+      <div class="nc-sep"></div>
+      <div class="nc-bonus">Hardened infrastructure<br>SABOTAGE success +5%</div>
+    </div>
+  </div>
+</div>
+
+<!-- THREE.JS canvas host -->
+<div id="canvas-container"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-sect" style="margin-right:8px">
+    <span style="font-size:26px;line-height:1" id="h-flag">🇺🇸</span>
+    <span class="hud-sub" id="h-nation" style="letter-spacing:2px">USA</span>
+  </div>
+  <div class="hud-sect">
+    <span class="hud-lbl">Credits</span>
+    <span class="hud-val" id="h-cred">500c</span>
+    <span class="hud-sub" id="h-cps">+8/s</span>
+  </div>
+
+  <div class="hud-sect">
+    <span class="hud-lbl">Your Science</span>
+    <span class="hud-val" id="h-sci">0.0%</span>
+    <div class="pbar"><div class="pfill player" id="h-sci-bar" style="width:0%"></div></div>
+  </div>
+
+  <div class="hud-sect">
+    <span class="hud-lbl">Uranium</span>
+    <span class="hud-val" id="h-du">0.0%</span>
+    <div class="pbar"><div class="pfill uranium" id="h-du-bar" style="width:0%"></div></div>
+  </div>
+
+  <div class="hud-sect">
+    <span class="hud-lbl" id="h-silo-lbl" style="color:#4a6a8a">Silo — not built</span>
+  </div>
+
+  <div class="hud-sect">
+    <span class="hud-lbl">Enemy Estimate</span>
+    <span class="hud-val" id="h-enemy">~0–30%</span>
+    <div class="pbar"><div class="pfill enemy" id="h-enemy-bar" style="width:15%"></div></div>
+  </div>
+
+  <div id="assembly-display">
+    <div class="hud-sect">
+      <span class="hud-lbl">Assembly</span>
+      <span class="hud-val" id="h-asm">0%</span>
+      <div class="pbar" style="width:150px">
+        <div class="pfill assembly" id="h-asm-bar" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-left:auto">
+    <button class="btn assembly-btn" id="btn-asm" style="display:none" onclick="G.startAssembly()">
+      ⚛ START ASSEMBLY
+    </button>
+  </div>
+</div>
+
+<!-- Left Sidebar -->
+<div id="sidebar-left">
+  <div class="sec-hdr">Build</div>
+  <button class="btn" id="btn-build" onclick="G.enterBuildMode()">
+    Place Lab<br><span class="cost-tag">500c — +0.04 sci/s</span>
+  </button>
+  <button class="btn" id="btn-jammer" onclick="G.enterJammerMode()">
+    Deploy Jammer<br><span class="cost-tag">600c — blocks ops / slows sci</span>
+  </button>
+  <button class="btn" id="btn-reactor" onclick="G.enterReactorMode()">
+    Build Reactor<br><span class="cost-tag">700c — +0.10 uranium/s</span>
+  </button>
+  <button class="btn" id="btn-silo" onclick="G.enterSiloMode()">
+    Build Silo<br><span class="cost-tag">1200c — required to launch</span>
+  </button>
+  <div class="sec-info" id="sl-labs">Labs: 0 · Jammers: 0</div>
+  <div class="sec-info" id="sl-detail" style="margin-top:4px"></div>
+
+  <div class="sec-hdr" style="margin-top:auto">Science rate</div>
+  <div class="sec-info" id="sl-rate">0.0 sci/s</div>
+</div>
+
+<!-- Right Sidebar -->
+<div id="sidebar-right">
+  <div class="sec-hdr">Operations</div>
+
+  <button class="btn" id="btn-recon" onclick="G.selectOp('RECON')">
+    RECON<br><span class="cost-tag">300c · 45s · 65% · radius</span>
+  </button>
+  <button class="btn" id="btn-steal" onclick="G.selectOp('STEAL')">
+    STEAL<br><span class="cost-tag">500c · 70s · 45%</span>
+  </button>
+  <button class="btn" id="btn-sabotage" onclick="G.selectOp('SABOTAGE')">
+    SABOTAGE<br><span class="cost-tag">700c · 100s · 40%</span>
+  </button>
+  <div class="sec-info">Select, then click globe</div>
+
+  <div class="sec-hdr">Counter-Intel</div>
+  <button class="btn" id="btn-sweep" onclick="G.doSweep()">
+    SWEEP<br><span class="cost-tag">1500c · all labs scan area</span>
+  </button>
+
+  <div class="sec-hdr">Active Ops</div>
+  <div id="sr-ops"><div class="sec-info">—</div></div>
+
+  <div class="sec-hdr">Intel</div>
+  <div class="sec-info" id="sr-intel">No intel. Launch RECON to gather data.</div>
+</div>
+
+<!-- Event Log -->
+<div id="event-log"></div>
+
+<!-- Context Menu -->
+<div id="ctx-menu"></div>
+
+<!-- Targeting Indicator -->
+<div id="target-ind">Click globe to target</div>
+
+<!-- Hover region label -->
+<div id="hover-label" style="
+  position:fixed; bottom:106px; right:190px;
+  background:rgba(0,5,15,0.82); border:1px solid #4a8aaa;
+  padding:5px 14px; font-family:'Courier New',monospace;
+  font-size:11px; color:#ffd870; border-radius:3px;
+  pointer-events:none; display:none; letter-spacing:1px;
+  z-index:150;
+"></div>
+
+<!-- Notification -->
+<div id="notif"></div>
+
+<!-- Game Over -->
+<div id="game-over">
+  <h1 id="go-title">VICTORY</h1>
+  <p id="go-desc">You completed the weapon assembly first.</p>
+  <div class="btn-row">
+    <button class="btn show-results-btn" onclick="showResults()">◎ SHOW RESULTS</button>
+    <button class="btn restart-btn" onclick="location.reload()">▶ PLAY AGAIN</button>
+  </div>
+</div>
+
+<!-- Floating pill visible when inspecting the globe after game over -->
+<div id="results-pill">
+  <button class="btn" onclick="location.reload()">▶ PLAY AGAIN</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+const C = {
+  LAB_COST:           500,
+  CREDITS_BASE:       5,
+  CREDITS_PER_LAB:    3,
+  SCI_PER_LAB:        0.04,   // per second per active lab
+  ASSEMBLY_TIME:      240000, // 4 minutes
+  AI_TICK:            20000,
+  DETECT_CHANCE:      0.30,
+  SABOTAGE_DUR:       120000, // 2 minutes
+  RECON_RADIUS:       0.32,   // chord distance on unit sphere ≈ ~2000 km
+  JAMMER_COST:        600,
+  SWEEP_COST:         1500,
+  JAMMER_RADIUS:      0.22,   // effect radius (chord distance)
+  SWEEP_RADIUS:       0.20,   // per-lab scan radius
+  JAMMER_DEF_PENALTY: 0.28,   // op success reduction near friendly jammer
+  SILO_COST:          1200,
+  REACTOR_COST:       700,
+  DU_PER_REACTOR:     0.10,   // depleted uranium per second per reactor
+};
+
+// Nation capitals for ICBM targeting
+const NATION_CAPITALS = {
+  USA:    { lat: 38.9,  lon: -77.0 },   // Washington DC
+  RUSSIA: { lat: 55.75, lon:  37.6 },   // Moscow
+};
+
+const OPS = {
+  RECON:    { cost: 300, duration: 45000,  success: 0.65 },
+  STEAL:    { cost: 500, duration: 70000,  success: 0.45 },
+  SABOTAGE: { cost: 700, duration: 100000, success: 0.40 },
+};
+
+let _uid = 0;
+const uid = () => ++_uid;
+
+// ── Nation selection ───────────────────────────────────────────
+let playerNation = null;
+let nationBonuses = { RECON: 0, STEAL: 0, SABOTAGE: 0 };
+
+function selectNation(nation) {
+  playerNation = nation;
+  applySettings();
+  document.getElementById('nation-screen').style.display = 'none';
+
+  const flag = nation === 'USA' ? '🇺🇸' : '🇷🇺';
+  const name = nation === 'USA' ? 'USA'  : 'RUSSIA';
+  document.getElementById('h-flag').textContent   = flag;
+  document.getElementById('h-nation').textContent = name;
+
+  if (nation === 'USA')    nationBonuses.RECON    = 0.05;
+  if (nation === 'RUSSIA') nationBonuses.SABOTAGE = 0.05;
+
+  // In multiplayer (host only), tell guest which nation the host chose
+  if (MP.active && MP.isHost) {
+    const remoteNation = nation === 'USA' ? 'RUSSIA' : 'USA';
+    MP.remoteNation = remoteNation;
+    MP.remoteNationBonuses.RECON    = remoteNation === 'USA'    ? 0.05 : 0;
+    MP.remoteNationBonuses.SABOTAGE = remoteNation === 'RUSSIA' ? 0.05 : 0;
+    MP.send('GAME_START', { nation });
+  }
+
+  init();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SETTINGS + MENU NAVIGATION
+// ═══════════════════════════════════════════════════════════════
+const SETTINGS = {
+  difficulty: 'normal',  // easy | normal | hard
+  speed:      'normal',  // short | normal | long
+  autoSpin:   true,
+  sound:      true,
+};
+
+function applySettings() {
+  const sm = { short: 2.5, normal: 1.0, long: 0.5 }[SETTINGS.speed];
+  C.SCI_PER_LAB     = +(0.04  * sm).toFixed(4);
+  C.DU_PER_REACTOR  = +(0.10  * sm).toFixed(4);
+  C.CREDITS_BASE    = Math.round(5 * sm);
+  C.CREDITS_PER_LAB = Math.round(3 * sm);
+  C.ASSEMBLY_TIME   = Math.round(240000 / sm);
+  C.SABOTAGE_DUR    = Math.round(120000 / sm);
+  const dm = { easy: 2.0, normal: 1.0, hard: 0.55 }[SETTINGS.difficulty];
+  C.AI_TICK = Math.round(20000 * dm);
+}
+
+function setSetting(key, val) {
+  SETTINGS[key] = val;
+  document.querySelectorAll(`.sopt[data-key="${key}"]`).forEach(el => {
+    el.classList.toggle('active', el.dataset.val === String(val));
+  });
+  const diffDesc = {
+    easy:   'Slow AI — builds infrequently and rarely launches operations.',
+    normal: 'Balanced — AI builds and operates at normal speed.',
+    hard:   'Aggressive AI — builds fast and launches operations frequently.',
+  };
+  const speedDesc = {
+    short:  'Fast pacing — labs and reactors generate resources at 2.5× rate.',
+    normal: 'Standard pacing — resources generate at normal rate.',
+    long:   'Slow pacing — resources at half rate, longer strategic game.',
+  };
+  const dd = document.getElementById('desc-difficulty');
+  const sd = document.getElementById('desc-speed');
+  if (dd) dd.textContent = diffDesc[SETTINGS.difficulty];
+  if (sd) sd.textContent = speedDesc[SETTINGS.speed];
+}
+
+function showMainMenu() {
+  document.getElementById('main-menu').style.display       = 'flex';
+  document.getElementById('help-screen').style.display     = 'none';
+  document.getElementById('settings-screen').style.display = 'none';
+  document.getElementById('nation-screen').style.display   = 'none';
+  document.getElementById('mp-screen').style.display       = 'none';
+}
+
+function showMp() {
+  document.getElementById('main-menu').style.display = 'none';
+  document.getElementById('mp-screen').style.display = 'flex';
+}
+
+function showNationSelect() {
+  document.getElementById('main-menu').style.display     = 'none';
+  document.getElementById('nation-screen').style.display = 'flex';
+}
+
+function showHelp() {
+  document.getElementById('main-menu').style.display   = 'none';
+  document.getElementById('help-screen').style.display = 'flex';
+}
+
+function showSettings() {
+  document.getElementById('main-menu').style.display       = 'none';
+  document.getElementById('settings-screen').style.display = 'flex';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MULTIPLAYER  (PeerJS WebRTC — peer-to-peer, no server needed)
+// ═══════════════════════════════════════════════════════════════
+function genRoomCode() {
+  const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += c[Math.floor(Math.random() * c.length)];
+  return code;
+}
+
+function mpStatus(msg) {
+  const el = document.getElementById('mp-status-row');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+}
+
+const MP = {
+  active:   false,
+  isHost:   false,
+  peer:     null,
+  conn:     null,
+  myId:     null,
+  remoteNation:        null,
+  remoteNationBonuses: { RECON: 0, STEAL: 0, SABOTAGE: 0 },
+  pendingOps: {},   // opId → op object, waiting for OP_RESULT
+
+  send(type, data) {
+    if (this.conn?.open) this.conn.send(JSON.stringify({ type, data }));
+  },
+
+  _onConn(conn) {
+    this.conn = conn;
+    conn.on('data',  raw   => handleNetMsg(raw));
+    conn.on('close', ()    => {
+      if (!state.gameOver) { log('⚠ Opponent disconnected!', 'danger'); toast('Opponent disconnected!'); }
+    });
+    conn.on('error', err  => log(`Net error: ${err}`, 'warn'));
+  },
+
+  host() {
+    const code = genRoomCode();
+    this.isHost = true;
+    this.myId   = code;
+    mpStatus('Initialising…');
+    if (typeof Peer === 'undefined') { mpStatus('PeerJS failed to load. Check your connection and reload.'); return; }
+    this.peer = new Peer(code, { debug: 0 });
+    this.peer.on('open', id => {
+      this.myId = id;
+      document.getElementById('mp-room-code').textContent = id;
+      document.getElementById('mp-code-display').style.display = 'block';
+      mpStatus('Waiting for opponent to connect…');
+    });
+    this.peer.on('connection', conn => {
+      this._onConn(conn);
+      conn.on('open', () => {
+        mpStatus('Opponent connected! Pick your nation.');
+        showNationSelect();
+      });
+    });
+    this.peer.on('error', err => mpStatus(`Error: ${err.type}. Try a different code or reload.`));
+  },
+
+  join(code) {
+    this.isHost = false;
+    mpStatus('Connecting…');
+    if (typeof Peer === 'undefined') { mpStatus('PeerJS failed to load. Check your connection and reload.'); return; }
+    this.peer = new Peer({ debug: 0 });
+    this.peer.on('open', () => {
+      const conn = this.peer.connect(code, { reliable: true });
+      this._onConn(conn);
+      conn.on('open',  () => mpStatus('Connected! Waiting for host to pick a nation…'));
+      conn.on('error', () => mpStatus('Connection failed — check the room code and try again.'));
+    });
+    this.peer.on('error', err => mpStatus(`Error: ${err.type}. Reload and try again.`));
+  },
+};
+
+function mpDoHost() {
+  MP.active = true;
+  MP.host();
+}
+function mpDoJoin() {
+  const code = (document.getElementById('mp-join-input')?.value || '').trim().toUpperCase();
+  if (code.length < 4) { mpStatus('Enter a valid room code (at least 4 characters).'); return; }
+  MP.active = true;
+  MP.join(code);
+}
+
+// ── Periodic SYNC ──────────────────────────────────────────────
+setInterval(() => {
+  if (MP.active && state.player && !state.gameOver) {
+    MP.send('SYNC', { science: state.player.science, du: state.player.depletedUranium });
+  }
+}, 12000);
+
+// ── Incoming message router ────────────────────────────────────
+function handleNetMsg(raw) {
+  let msg;
+  try { msg = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return; }
+  const { type, data } = msg;
+
+  switch (type) {
+
+    // ── Guest receives host's nation → auto-assigns opposing nation ──
+    case 'GAME_START': {
+      const hostNation  = data.nation;
+      const guestNation = hostNation === 'USA' ? 'RUSSIA' : 'USA';
+      playerNation = guestNation;
+      if (guestNation === 'USA')    nationBonuses.RECON    = 0.05;
+      if (guestNation === 'RUSSIA') nationBonuses.SABOTAGE = 0.05;
+      MP.remoteNation = hostNation;
+      MP.remoteNationBonuses.RECON    = hostNation === 'USA'    ? 0.05 : 0;
+      MP.remoteNationBonuses.SABOTAGE = hostNation === 'RUSSIA' ? 0.05 : 0;
+      document.getElementById('h-flag').textContent   = guestNation === 'USA' ? '🇺🇸' : '🇷🇺';
+      document.getElementById('h-nation').textContent = guestNation;
+      document.getElementById('mp-screen').style.display = 'none';
+      applySettings();
+      init();
+      log(`Multiplayer game started! You are playing as ${guestNation}.`, 'imp');
+      break;
+    }
+
+    // ── Opponent built a structure (add to ai state, hidden by fog) ──
+    case 'BUILD_LAB': {
+      if (!state.ai) break;
+      const l = new Lab(data.lat, data.lon, REGIONS[data.regionId] || null, 'ai');
+      l.id = data.id;
+      state.ai.labs.push(l);
+      state.ai.creditsPerSec = C.CREDITS_BASE + state.ai.labs.length * C.CREDITS_PER_LAB;
+      break;
+    }
+    case 'BUILD_JAMMER': {
+      if (!state.ai) break;
+      const j = new Jammer(data.lat, data.lon, REGIONS[data.regionId] || null, 'ai');
+      j.id = data.id;
+      state.ai.jammers.push(j);
+      break;
+    }
+    case 'BUILD_REACTOR': {
+      if (!state.ai) break;
+      const r = new Reactor(data.lat, data.lon, REGIONS[data.regionId] || null, 'ai');
+      r.id = data.id;
+      state.ai.reactors.push(r);
+      break;
+    }
+    case 'BUILD_SILO': {
+      if (!state.ai) break;
+      const s = new Silo(data.lat, data.lon, REGIONS[data.regionId] || null, 'ai');
+      s.id = data.id;
+      state.ai.silo = s;
+      break;
+    }
+
+    // ── Opponent launched an op against us — we are the defender ──
+    case 'LAUNCH_OP': resolveRemoteOp(data); break;
+
+    // ── Result of our op against opponent ─────────────────────
+    case 'OP_RESULT': applyOpResult(data); break;
+
+    // ── Opponent started assembly ──────────────────────────────
+    case 'ASSEMBLY_START': {
+      if (!state.ai) break;
+      state.ai.assembling    = true;
+      state.ai.assemblyStart = Date.now();
+      log('⚠ INTEL: Enemy has initiated assembly!', 'danger');
+      toast('Enemy assembly underway!');
+      SFX.alert();
+      break;
+    }
+
+    // ── Periodic resource sync ─────────────────────────────────
+    case 'SYNC': {
+      if (!state.ai || !state.player) break;
+      if (data.science !== undefined) {
+        state.ai.science = data.science;
+        state.player.estimatedEnemySci.min = Math.max(0,   data.science - 8);
+        state.player.estimatedEnemySci.max = Math.min(100, data.science + 8);
+      }
+      if (data.du !== undefined) state.ai.depletedUranium = data.du;
+      break;
+    }
+
+    // ── Opponent won ───────────────────────────────────────────
+    case 'GAME_OVER': {
+      if (!state.gameOver) endGame(false);
+      break;
+    }
+  }
+}
+
+// ── Defender-side op resolution ────────────────────────────────
+function resolveRemoteOp(data) {
+  if (!state.player) return;
+  const { opId, type, lat, lon, regionId } = data;
+  const defender    = state.player;
+  const remoteBonus = MP.remoteNationBonuses[type] || 0;
+  const targetV     = ll2v3(lat, lon);
+  const jammed      = defender.jammers.some(j => targetV.distanceTo(ll2v3(j.lat, j.lon)) <= C.JAMMER_RADIUS);
+  const jamPenalty  = jammed ? C.JAMMER_DEF_PENALTY : 0;
+  const success     = Math.random() < Math.max(0.05, OPS[type].success + remoteBonus - jamPenalty);
+  const result      = { opId, opType: type, success, jammed };
+
+  if (!success) { MP.send('OP_RESULT', result); return; }
+
+  if (type === 'RECON') {
+    const origin = ll2v3(lat, lon);
+    result.revealedLabs = defender.labs
+      .filter(l => origin.distanceTo(ll2v3(l.lat, l.lon)) <= C.RECON_RADIUS)
+      .map(l => ({ id: l.id, lat: l.lat, lon: l.lon, regionId: l.region?.id || null }));
+    result.revealedJammers = defender.jammers
+      .filter(j => origin.distanceTo(ll2v3(j.lat, j.lon)) <= C.RECON_RADIUS)
+      .map(j => ({ id: j.id, lat: j.lat, lon: j.lon }));
+    result.revealedReactors = defender.reactors
+      .filter(r => origin.distanceTo(ll2v3(r.lat, r.lon)) <= C.RECON_RADIUS)
+      .map(r => ({ id: r.id, lat: r.lat, lon: r.lon }));
+    result.revealedSilo = (defender.silo &&
+      origin.distanceTo(ll2v3(defender.silo.lat, defender.silo.lon)) <= C.RECON_RADIUS)
+      ? { id: defender.silo.id, lat: defender.silo.lat, lon: defender.silo.lon }
+      : null;
+    spawnSearchPulse(lat, lon);  // visual: someone just scanned our area
+
+  } else if (type === 'STEAL') {
+    const loss = 4;
+    defender.science = Math.max(0, defender.science - loss);
+    result.sciGained = 8;
+    SFX.alert();
+    log(`⚠ Enemy stole your science! −${loss}%`, 'danger');
+    toast(`Enemy stole your science! −${loss}%`);
+
+  } else if (type === 'SABOTAGE') {
+    const t3 = ll2v3(lat, lon);
+    const candidates = [];
+    for (const lab of defender.labs) {
+      if (!lab.isActive()) continue;
+      candidates.push({ kind: 'lab', obj: lab, dist: t3.distanceTo(ll2v3(lab.lat, lab.lon)) });
+    }
+    for (const j of defender.jammers)
+      candidates.push({ kind: 'jammer',  obj: j, dist: t3.distanceTo(ll2v3(j.lat, j.lon)) });
+    for (const r of defender.reactors)
+      candidates.push({ kind: 'reactor', obj: r, dist: t3.distanceTo(ll2v3(r.lat, r.lon)) });
+    if (defender.silo)
+      candidates.push({ kind: 'silo', obj: defender.silo, dist: t3.distanceTo(ll2v3(defender.silo.lat, defender.silo.lon)) });
+    candidates.sort((a, b) => a.dist - b.dist);
+    const hit = candidates.length > 0 && candidates[0].dist < 0.55 ? candidates[0] : null;
+    result.hit = null;
+
+    if (hit) {
+      result.hit = { kind: hit.kind, id: hit.obj.id };
+      if (hit.kind === 'lab') {
+        hit.obj.disabledUntil = Date.now() + C.SABOTAGE_DUR;
+        const interrupted = defender.interruptAssembly();
+        result.assemblyInterrupted = interrupted;
+        SFX.alert();
+        if (hit.obj.marker) setMarkerEnabled(hit.obj.marker, false);
+        log('⚠ Your lab was sabotaged! Offline 2min', 'danger');
+        toast('Your lab sabotaged — offline 2min!');
+        if (interrupted) { log('⚡ Your assembly was INTERRUPTED!', 'danger'); toast('YOUR ASSEMBLY INTERRUPTED!'); }
+      } else if (hit.kind === 'jammer') {
+        const j = hit.obj;
+        if (j.marker) { MARKERS.remove(j.marker); j.marker = null; }
+        defender.jammers = defender.jammers.filter(x => x.id !== j.id);
+        SFX.destroyed(); log('⚠ Your jammer was destroyed!', 'danger'); toast('Your jammer was destroyed!');
+      } else if (hit.kind === 'reactor') {
+        const r = hit.obj;
+        if (r.marker) { MARKERS.remove(r.marker); r.marker = null; }
+        defender.reactors = defender.reactors.filter(x => x.id !== r.id);
+        SFX.destroyed(); log('⚠ Your reactor was destroyed!', 'danger'); toast('Your reactor was destroyed!');
+      } else if (hit.kind === 'silo') {
+        const s = hit.obj;
+        if (s.marker) { MARKERS.remove(s.marker); s.marker = null; }
+        defender.silo = null;
+        const interrupted = defender.interruptAssembly();
+        result.assemblyInterrupted = interrupted;
+        SFX.destroyed(); log('⚠ YOUR SILO WAS DESTROYED!', 'danger');
+        if (interrupted) { log('⚡ YOUR LAUNCH WAS ABORTED!', 'danger'); toast('Silo destroyed — build a new one!'); }
+        else toast('Your rocket silo was destroyed!');
+      }
+    }
+  }
+
+  MP.send('OP_RESULT', result);
+  updateUI();
+}
+
+// ── Attacker-side op result application ────────────────────────
+function applyOpResult(data) {
+  const { opId, opType, success, jammed } = data;
+  const op = MP.pendingOps[opId];
+  if (!op) return;
+  delete MP.pendingOps[opId];
+  op.done = true;
+  if (op.ring) { RINGS.remove(op.ring); op.ring = null; }
+
+  if (!success) {
+    log(`${opType} FAILED${jammed ? ' — jammer interference' : ''}`, 'warn');
+    SFX.opFail(); return;
+  }
+
+  if (opType === 'RECON') {
+    spawnSearchPulse(op.lat, op.lon);
+    let found = 0;
+
+    for (const rd of data.revealedLabs || []) {
+      let lab = state.ai.labs.find(l => l.id === rd.id);
+      if (!lab) {
+        lab = new Lab(rd.lat, rd.lon, REGIONS[rd.regionId] || null, 'ai');
+        lab.id = rd.id;
+        state.ai.labs.push(lab);
+      }
+      if (!state.player.revealedEnemyLabs.some(r => r.lab.id === lab.id)) {
+        state.player.revealedEnemyLabs.push({ lab });
+        createLabMarker(lab, false);
+        if (lab.region) state.player.knownEnemyRegions.add(lab.region.id);
+        found++;
+      }
+    }
+    for (const jd of data.revealedJammers || []) {
+      let j = state.ai.jammers.find(x => x.id === jd.id);
+      if (!j) { j = new Jammer(jd.lat, jd.lon, null, 'ai'); j.id = jd.id; state.ai.jammers.push(j); }
+      if (!state.player.revealedEnemyJammers.some(x => x.id === j.id)) {
+        state.player.revealedEnemyJammers.push(j);
+        createJammerMarker(j, false); found++;
+      }
+    }
+    for (const rd of data.revealedReactors || []) {
+      let r = state.ai.reactors.find(x => x.id === rd.id);
+      if (!r) { r = new Reactor(rd.lat, rd.lon, null, 'ai'); r.id = rd.id; state.ai.reactors.push(r); }
+      if (!state.player.revealedEnemyReactors.some(x => x.id === r.id)) {
+        state.player.revealedEnemyReactors.push(r);
+        createReactorMarker(r, false); found++;
+      }
+    }
+    if (data.revealedSilo && !state.player.revealedEnemySilo) {
+      let s = state.ai.silo;
+      if (!s || s.id !== data.revealedSilo.id) {
+        s = new Silo(data.revealedSilo.lat, data.revealedSilo.lon, null, 'ai');
+        s.id = data.revealedSilo.id;
+        state.ai.silo = s;
+      }
+      state.player.revealedEnemySilo = s;
+      createSiloMarker(s, false);
+      log('RECON: Enemy ROCKET SILO located! SABOTAGE it!', 'ok'); found++;
+    }
+    SFX.opSuccess();
+    if (found > 0) { log(`RECON SUCCESS: ${found} structure(s) revealed!`, 'ok'); toast(`${found} structure(s) revealed!`); }
+    else { log('RECON: Nothing new found in that area.', 'imp'); }
+
+  } else if (opType === 'STEAL') {
+    const gained = data.sciGained || 0;
+    state.player.science = Math.min(100, state.player.science + gained);
+    SFX.opSuccess();
+    log(`STEAL SUCCESS: +${gained}% science!`, 'ok'); toast(`+${gained}% science stolen!`);
+
+  } else if (opType === 'SABOTAGE') {
+    if (!data.hit) { log('SABOTAGE: No valid target in range.', 'warn'); SFX.opFail(); return; }
+    SFX.opSuccess();
+    const { kind, id } = data.hit;
+    if (kind === 'lab') {
+      const rev = state.player.revealedEnemyLabs.find(r => r.lab.id === id);
+      if (rev) { rev.lab.disabledUntil = Date.now() + C.SABOTAGE_DUR; setMarkerEnabled(rev.lab.marker, false); }
+      log('SABOTAGE SUCCESS: Enemy lab disabled for 2min!', 'ok'); toast('Enemy lab sabotaged!');
+      if (data.assemblyInterrupted) { log('⚡ Enemy assembly INTERRUPTED!', 'ok'); toast('Enemy ASSEMBLY INTERRUPTED!'); }
+    } else if (kind === 'jammer') {
+      const j = state.player.revealedEnemyJammers.find(x => x.id === id);
+      if (j) { if (j.marker) { MARKERS.remove(j.marker); j.marker = null; }
+        state.ai.jammers = state.ai.jammers.filter(x => x.id !== id);
+        state.player.revealedEnemyJammers = state.player.revealedEnemyJammers.filter(x => x.id !== id); }
+      log('SABOTAGE SUCCESS: Enemy jammer destroyed!', 'ok'); toast('Enemy jammer obliterated!');
+    } else if (kind === 'reactor') {
+      const r = state.player.revealedEnemyReactors.find(x => x.id === id);
+      if (r) { if (r.marker) { MARKERS.remove(r.marker); r.marker = null; }
+        state.ai.reactors = state.ai.reactors.filter(x => x.id !== id);
+        state.player.revealedEnemyReactors = state.player.revealedEnemyReactors.filter(x => x.id !== id); }
+      log('SABOTAGE SUCCESS: Enemy reactor destroyed!', 'ok'); toast('Enemy reactor destroyed!');
+    } else if (kind === 'silo') {
+      const s = state.player.revealedEnemySilo;
+      if (s) { if (s.marker) { MARKERS.remove(s.marker); s.marker = null; }
+        state.ai.silo = null; state.player.revealedEnemySilo = null; }
+      log('SABOTAGE SUCCESS: Enemy SILO destroyed!', 'ok');
+      if (data.assemblyInterrupted) { log('⚡ Enemy LAUNCH ABORTED!', 'ok'); toast('Enemy silo destroyed — launch aborted!'); }
+      else toast('Enemy rocket silo obliterated!');
+    }
+  }
+
+  refreshFogMarkers();
+  updateUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SOUND ENGINE  (Web Audio API — fully synthesized, no files)
+// ═══════════════════════════════════════════════════════════════
+let _actx = null;
+function actx() {
+  if (!SETTINGS.sound) return null;
+  if (!_actx) _actx = new (window.AudioContext || window.webkitAudioContext)();
+  if (_actx.state === 'suspended') _actx.resume();
+  return _actx;
+}
+
+// Single oscillator tone with attack+decay envelope
+function tone(freq, dur, type = 'sine', vol = 0.22, t0 = 0) {
+  const c = actx(); if (!c) return;
+  const now = c.currentTime + t0;
+  const o = c.createOscillator(), g = c.createGain();
+  o.connect(g); g.connect(c.destination);
+  o.type = type;
+  o.frequency.setValueAtTime(freq, now);
+  g.gain.setValueAtTime(0.001, now);
+  g.gain.linearRampToValueAtTime(vol, now + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+  o.start(now); o.stop(now + dur + 0.05);
+}
+
+// Frequency-ramping tone (for whoosh/sweep effects)
+function ramp(f0, f1, dur, type = 'sine', vol = 0.20, t0 = 0) {
+  const c = actx(); if (!c) return;
+  const now = c.currentTime + t0;
+  const o = c.createOscillator(), g = c.createGain();
+  o.connect(g); g.connect(c.destination);
+  o.type = type;
+  o.frequency.setValueAtTime(f0, now);
+  o.frequency.exponentialRampToValueAtTime(f1, now + dur);
+  g.gain.setValueAtTime(vol, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+  o.start(now); o.stop(now + dur + 0.05);
+}
+
+// Band-pass filtered white noise burst
+function noise(dur, vol = 0.25, t0 = 0, filterHz = 400) {
+  const c = actx(); if (!c) return;
+  const now = c.currentTime + t0;
+  const sr  = c.sampleRate;
+  const buf = c.createBuffer(1, Math.ceil(sr * (dur + 0.1)), sr);
+  const dat = buf.getChannelData(0);
+  for (let i = 0; i < dat.length; i++) dat[i] = Math.random() * 2 - 1;
+  const src = c.createBufferSource(), flt = c.createBiquadFilter(), g = c.createGain();
+  flt.type = 'bandpass'; flt.frequency.value = filterHz;
+  src.buffer = buf;
+  src.connect(flt); flt.connect(g); g.connect(c.destination);
+  g.gain.setValueAtTime(0.001, now);
+  g.gain.linearRampToValueAtTime(vol, now + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+  src.start(now); src.stop(now + dur + 0.1);
+}
+
+const SFX = {
+  buildLab()    { tone(392,0.12,'sine',0.22); tone(523,0.22,'sine',0.18,0.10); },
+  buildReactor(){ tone(130,0.18,'sawtooth',0.22); tone(196,0.22,'sine',0.16,0.10); tone(261,0.30,'sine',0.12,0.20); },
+  buildJammer() { noise(0.08,0.30,0,600); tone(900,0.12,'square',0.14,0.06); tone(1200,0.08,'square',0.10,0.16); },
+  buildSilo()   { noise(0.12,0.20,0,150); tone(80,0.50,'sine',0.30); tone(160,0.28,'sine',0.16,0.10); tone(320,0.18,'sine',0.10,0.20); },
+
+  opLaunch()    { tone(880,0.06,'square',0.13); tone(880,0.06,'square',0.13,0.10); tone(1320,0.12,'square',0.16,0.20); },
+  opSuccess()   { tone(440,0.08,'sine',0.18); tone(554,0.08,'sine',0.18,0.08); tone(659,0.22,'sine',0.22,0.16); },
+  opFail()      { tone(440,0.10,'sawtooth',0.14); tone(330,0.12,'sawtooth',0.12,0.09); tone(220,0.28,'sawtooth',0.10,0.18); },
+
+  alert()       { tone(880,0.08,'square',0.22); tone(660,0.08,'square',0.18,0.12); tone(880,0.08,'square',0.22,0.24); tone(660,0.14,'square',0.18,0.36); },
+  destroyed()   { noise(0.35,0.45,0,180); tone(180,0.45,'sawtooth',0.22,0.04); tone(90,0.60,'sine',0.18,0.14); },
+
+  sweep()       { ramp(700,180,0.90,'sine',0.22); },
+
+  assemblyStart(){ [261,329,392,523].forEach((f,i) => tone(f,0.5+i*0.08,'sine',0.16,i*0.09)); },
+  assemblyTick() { tone(1400,0.04,'square',0.12); noise(0.03,0.10,0.02,2200); },
+
+  icbmLaunch()  { noise(0.60,0.40,0,120); tone(80,2.0,'sawtooth',0.28); ramp(120,2600,2.2,'sawtooth',0.20); },
+  icbmImpact()  { noise(1.2,0.65,0,160); tone(55,1.5,'sine',0.40); tone(40,2.0,'sine',0.28,0.12); },
+
+  victory()     { [261,329,392,523,659,784].forEach((f,i) => tone(f,0.5+i*0.04,'sine',0.16,i*0.09)); },
+  defeat()      { [392,349,294,261,220,196].forEach((f,i) => tone(f,0.5,'sine',0.16,i*0.13)); },
+};
+
+let _lastAssemblyTick = 0;
+
+// ═══════════════════════════════════════════════════════════════
+//  REGIONS
+// ═══════════════════════════════════════════════════════════════
+const REGIONS = {
+  NA:  { id:'NA',  name:'North America',       latMin:20,  latMax:72,  lonMin:-170, lonMax:-52,  color:0x3d6b45 },
+  SAM: { id:'SAM', name:'South America',       latMin:-56, latMax:14,  lonMin:-82,  lonMax:-33,  color:0x4a7038 },
+  WEU: { id:'WEU', name:'Western Europe',      latMin:35,  latMax:71,  lonMin:-15,  lonMax:25,   color:0x3a527a },
+  EEU: { id:'EEU', name:'Eastern Europe',      latMin:40,  latMax:65,  lonMin:25,   lonMax:50,   color:0x363a6a },
+  RUS: { id:'RUS', name:'Russia',              latMin:50,  latMax:78,  lonMin:50,   lonMax:180,  color:0x4c4840 },
+  MEA: { id:'MEA', name:'Middle East',         latMin:12,  latMax:42,  lonMin:25,   lonMax:65,   color:0x7c6028 },
+  NAF: { id:'NAF', name:'North Africa',        latMin:14,  latMax:38,  lonMin:-18,  lonMax:40,   color:0x967830 },
+  SSA: { id:'SSA', name:'Sub-Saharan Africa',  latMin:-36, latMax:14,  lonMin:-18,  lonMax:52,   color:0x5c4228 },
+  CAS: { id:'CAS', name:'Central Asia',        latMin:35,  latMax:56,  lonMin:50,   lonMax:90,   color:0x685240 },
+  SAS: { id:'SAS', name:'South Asia',          latMin:5,   latMax:38,  lonMin:65,   lonMax:100,  color:0x4c6a28 },
+  EAS: { id:'EAS', name:'East Asia',           latMin:18,  latMax:55,  lonMin:100,  lonMax:145,  color:0x2e5c78 },
+  SEA: { id:'SEA', name:'Southeast Asia',      latMin:-10, latMax:25,  lonMin:95,   lonMax:142,  color:0x2e7050 },
+  OCE: { id:'OCE', name:'Oceania',             latMin:-46, latMax:-10, lonMin:110,  lonMax:178,  color:0x245868 },
+  JAP: { id:'JAP', name:'Japan / Korea',       latMin:30,  latMax:50,  lonMin:126,  lonMax:148,  color:0x3c3870 },
+  ARC: { id:'ARC', name:'Arctic',              latMin:78,  latMax:90,  lonMin:-180, lonMax:180,  color:0x606a78 },
+};
+
+// Priority order: more specific regions first
+const REGION_ORDER = ['JAP','ARC','NA','SAM','WEU','EEU','RUS','MEA','NAF','SSA','CAS','SAS','EAS','SEA','OCE'];
+
+function getRegion(lat, lon) {
+  for (const k of REGION_ORDER) {
+    const r = REGIONS[k];
+    if (lat >= r.latMin && lat <= r.latMax && lon >= r.lonMin && lon <= r.lonMax) return r;
+  }
+  return null;
+}
+
+function randInRegion(r) {
+  return {
+    lat: r.latMin + Math.random() * (r.latMax - r.latMin),
+    lon: r.lonMin + Math.random() * (r.lonMax - r.lonMin),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME CLASSES
+// ═══════════════════════════════════════════════════════════════
+class Lab {
+  constructor(lat, lon, region, ownerId) {
+    this.id = uid();
+    this.lat = lat; this.lon = lon;
+    this.region = region;
+    this.ownerId = ownerId;
+    this.disabledUntil = 0;
+    this.marker = null;
+  }
+  isActive() { return Date.now() >= this.disabledUntil; }
+}
+
+class Operation {
+  constructor(type, lat, lon, region) {
+    this.id = uid();
+    this.type = type;
+    this.lat = lat; this.lon = lon;
+    this.region = region;
+    this.startTime = Date.now();
+    this.duration = OPS[type].duration;
+    this.done = false;
+    this.ring = null;
+  }
+  progress() { return Math.min(1, (Date.now() - this.startTime) / this.duration); }
+  isComplete() { return Date.now() >= this.startTime + this.duration; }
+}
+
+class Jammer {
+  constructor(lat, lon, region, ownerId) {
+    this.id      = uid();
+    this.lat     = lat;  this.lon = lon;
+    this.region  = region;
+    this.ownerId = ownerId;
+    this.marker  = null;
+  }
+}
+
+class Reactor {
+  constructor(lat, lon, region, ownerId) {
+    this.id      = uid();
+    this.lat     = lat;  this.lon = lon;
+    this.region  = region;
+    this.ownerId = ownerId;
+    this.marker  = null;
+  }
+}
+
+class Silo {
+  constructor(lat, lon, region, ownerId) {
+    this.id      = uid();
+    this.lat     = lat;  this.lon = lon;
+    this.region  = region;
+    this.ownerId = ownerId;
+    this.marker  = null;
+  }
+}
+
+class Player {
+  constructor(id, isHuman) {
+    this.id = id;
+    this.isHuman = isHuman;
+    this.credits = 500;
+    this.creditsPerSec = C.CREDITS_BASE;
+    this.science = 0;
+    this.labs = [];
+    this.ops = [];
+    this.jammers = [];
+    this.reactors = [];
+    this.silo = null;
+    this.depletedUranium = 0;
+    this.revealedEnemyJammers = [];
+    this.revealedEnemyReactors = [];
+    this.revealedEnemySilo = null;
+    this.revealedEnemyLabs = [];     // { lab }
+    this.knownEnemyRegions = new Set();
+    this.estimatedEnemySci = { min: 0, max: 30 };
+    this.assembling = false;
+    this.assemblyStart = 0;
+    this.assemblyDone = false;
+  }
+  activeLabs() { return this.labs.filter(l => l.isActive()); }
+  addLab(lab) {
+    this.labs.push(lab);
+    this.creditsPerSec = C.CREDITS_BASE + this.labs.length * C.CREDITS_PER_LAB;
+  }
+  startAssembly() {
+    if (this.science >= 100 && this.depletedUranium >= 100 && this.silo &&
+        !this.assembling && !this.assemblyDone) {
+      this.assembling = true; this.assemblyStart = Date.now(); return true;
+    }
+    return false;
+  }
+  assemblyProg() {
+    if (!this.assembling) return 0;
+    return Math.min(1, (Date.now() - this.assemblyStart) / C.ASSEMBLY_TIME);
+  }
+  interruptAssembly() {
+    if (this.assembling) { this.assembling = false; this.assemblyStart = 0; return true; }
+    return false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  THREE.JS SCENE SETUP
+// ═══════════════════════════════════════════════════════════════
+const scene    = new THREE.Scene();
+const camera   = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 0, 2.9);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+// Stars
+(() => {
+  const n = 2200, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const phi = Math.acos(2 * Math.random() - 1);
+    const th  = Math.random() * Math.PI * 2;
+    const r   = 50 + Math.random() * 30;
+    pos[i*3]   = r * Math.sin(phi) * Math.cos(th);
+    pos[i*3+1] = r * Math.cos(phi);
+    pos[i*3+2] = r * Math.sin(phi) * Math.sin(th);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.07 })));
+})();
+
+// Lighting
+scene.add(new THREE.AmbientLight(0x223344, 0.9));
+const sun = new THREE.DirectionalLight(0xfff0e8, 1.1);
+sun.position.set(4, 2, 3);
+scene.add(sun);
+
+// Globe group — everything on the planet lives here
+const G_GROUP = new THREE.Group();
+scene.add(G_GROUP);
+
+// Ocean sphere — higher segments for smoother silhouette
+const oceanMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(1.0, 96, 96),
+  new THREE.MeshPhongMaterial({ color: 0x0a2240, shininess: 20, specular: 0x0d2a50 })
+);
+G_GROUP.add(oceanMesh);
+
+// Atmosphere glow
+G_GROUP.add(new THREE.Mesh(
+  new THREE.SphereGeometry(1.06, 32, 32),
+  new THREE.MeshBasicMaterial({
+    color: 0x1a5090, transparent: true, opacity: 0.10,
+    side: THREE.BackSide, blending: THREE.AdditiveBlending,
+  })
+));
+
+
+// ═══════════════════════════════════════════════════════════════
+//  COORDINATE UTILITIES
+// ═══════════════════════════════════════════════════════════════
+function ll2v3(lat, lon, r = 1.002) {
+  const phi   = (90 - lat) * Math.PI / 180;
+  const theta = (lon + 180) * Math.PI / 180;
+  return new THREE.Vector3(
+    -r * Math.sin(phi) * Math.cos(theta),
+     r * Math.cos(phi),
+     r * Math.sin(phi) * Math.sin(theta)
+  );
+}
+
+function v3ToLL(v) {
+  const n = v.clone().normalize();
+  const lat = 90 - Math.acos(Math.max(-1, Math.min(1, n.y))) * 180 / Math.PI;
+  let theta = Math.atan2(n.z, -n.x);
+  if (theta < 0) theta += 2 * Math.PI;
+  const lon = theta * 180 / Math.PI - 180;
+  return { lat, lon };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GLOBE RENDERING — canvas texture (solid, no triangulation holes)
+//  + 3D border line meshes per region for hover highlighting
+// ═══════════════════════════════════════════════════════════════
+
+let countryFeats     = [];
+const regionBorders  = {};   // regionKey → THREE.LineSegments
+const countryByRegion = {}; // regionKey → [feat, ...]
+let overlayCanvas, overlayCtx, overlayTex, overlaySphere;
+let hoveredRegionKey = null;
+let landCanvas = null;   // kept after build for land/ocean sampling
+
+function isOnLand(lat, lon) {
+  if (!landCanvas) return true;  // canvas not ready — fail open
+  const W = landCanvas.width, H = landCanvas.height;
+  const [x, y] = llToXY(lon, lat, W, H);
+  const px = landCanvas.getContext('2d')
+    .getImageData(Math.floor(Math.min(x, W - 1)), Math.floor(Math.min(y, H - 1)), 1, 1).data;
+  // Ocean is painted #0a2240 = rgb(10, 34, 64).
+  // Sum of channel differences > 40 means it's not ocean = it's land.
+  return Math.abs(px[0] - 10) + Math.abs(px[1] - 34) + Math.abs(px[2] - 64) > 40;
+}
+
+async function buildGlobeCountries() {
+  try {
+    const res  = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+    const topo = await res.json();
+    countryFeats = topojson.feature(topo, topo.objects.countries).features;
+
+    // Pre-group by region for fast hover updates
+    for (const feat of countryFeats) {
+      const cen = polyCentroid(feat.geometry);
+      const reg = getRegion(cen.lat, cen.lon);
+      if (reg) (countryByRegion[reg.id] = countryByRegion[reg.id] || []).push(feat);
+    }
+
+    // ── 1. Paint all countries onto a 4096×2048 canvas, use as sphere texture ──
+    const W = 4096, H = 2048;
+    landCanvas = document.createElement('canvas');
+    landCanvas.width = W; landCanvas.height = H;
+    const baseCanvas = landCanvas;
+    const ctx = baseCanvas.getContext('2d');
+
+    ctx.fillStyle = '#0a2240';          // ocean
+    ctx.fillRect(0, 0, W, H);
+
+    for (const feat of countryFeats) { // filled country polygons
+      const cen = polyCentroid(feat.geometry);
+      const reg = getRegion(cen.lat, cen.lon);
+      ctx.fillStyle = '#' + countryColor(reg, feat.id).getHexString();
+      geoFill(ctx, feat.geometry, W, H);
+    }
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.28)'; // subtle country borders baked into texture
+    ctx.lineWidth   = 0.7;
+    for (const feat of countryFeats) {
+      ctx.beginPath();
+      geoTrace(ctx, feat.geometry, W, H);
+      ctx.stroke();
+    }
+
+    const baseTex = new THREE.CanvasTexture(baseCanvas);
+    baseTex.minFilter  = THREE.LinearFilter;  // no mipmaps = no blur
+    baseTex.magFilter  = THREE.LinearFilter;
+    baseTex.generateMipmaps = false;
+    baseTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    oceanMesh.material.map   = baseTex;
+    oceanMesh.material.color.set(0xffffff); // let texture supply colour
+    oceanMesh.material.needsUpdate = true;
+
+    // ── 2. Hover overlay — semi-transparent sphere redrawn on hover ──
+    overlayCanvas        = document.createElement('canvas');
+    overlayCanvas.width  = 2048;
+    overlayCanvas.height = 1024;
+    overlayCtx  = overlayCanvas.getContext('2d');
+    overlayTex  = new THREE.CanvasTexture(overlayCanvas);
+    overlaySphere = new THREE.Mesh(
+      new THREE.SphereGeometry(1.0018, 64, 64),
+      new THREE.MeshBasicMaterial({
+        map: overlayTex, transparent: true, depthWrite: false,
+      })
+    );
+    G_GROUP.add(overlaySphere);
+
+    // ── 3. 3D border line-segments per region (shown on hover) ──
+    buildRegionBorderLines(countryFeats);
+
+  } catch (e) {
+    console.warn('Globe: failed to load country data', e);
+  }
+}
+
+// ── Canvas drawing helpers ───────────────────────────────────
+function polyCentroid(geometry) {
+  let sLon = 0, sLat = 0, n = 0;
+  const rings = geometry.type === 'Polygon'
+    ? [geometry.coordinates[0]]
+    : geometry.coordinates.map(p => p[0]);
+  for (const ring of rings)
+    for (const [lon, lat] of ring) { sLon += lon; sLat += lat; n++; }
+  return { lon: sLon / n, lat: sLat / n };
+}
+
+function countryColor(region, id) {
+  const base = new THREE.Color(region ? region.color : 0x505050);
+  const h = ((parseInt(id) || 7) * 2654435761) >>> 0;
+  const t = ((h % 1000) / 1000) - 0.5;
+  return new THREE.Color(
+    Math.max(0.04, Math.min(0.88, base.r + t * 0.14)),
+    Math.max(0.04, Math.min(0.88, base.g + t * 0.10)),
+    Math.max(0.04, Math.min(0.88, base.b + t * 0.12)),
+  );
+}
+
+function llToXY(lon, lat, W, H) {
+  return [(lon + 180) / 360 * W, (90 - lat) / 180 * H];
+}
+
+function geoFill(ctx, geometry, W, H) {
+  const polys = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  for (const rings of polys) {
+    ctx.beginPath();
+    for (const ring of rings) {
+      let prevLon = null;
+      for (const [lon, lat] of ring) {
+        const [x, y] = llToXY(lon, lat, W, H);
+        // Antimeridian crossing: jump > 180° in longitude → lift the pen
+        if (prevLon === null || Math.abs(lon - prevLon) > 180) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+        prevLon = lon;
+      }
+      ctx.closePath();
+    }
+    ctx.fill('evenodd');
+  }
+}
+
+function geoTrace(ctx, geometry, W, H) {
+  const polys = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  for (const rings of polys) {
+    for (const ring of rings) {
+      let prevLon = null;
+      for (const [lon, lat] of ring) {
+        const [x, y] = llToXY(lon, lat, W, H);
+        if (prevLon === null || Math.abs(lon - prevLon) > 180) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+        prevLon = lon;
+      }
+      ctx.closePath();
+    }
+  }
+}
+
+// ── 3D border lines per region ───────────────────────────────
+function buildRegionBorderLines(feats) {
+  const segsPerRegion = {};
+
+  for (const feat of feats) {
+    const cen = polyCentroid(feat.geometry);
+    const reg = getRegion(cen.lat, cen.lon);
+    if (!reg) continue;
+    const buf = segsPerRegion[reg.id] || (segsPerRegion[reg.id] = []);
+    const polys = feat.geometry.type === 'Polygon'
+      ? [feat.geometry.coordinates] : feat.geometry.coordinates;
+    for (const rings of polys) {
+      for (const ring of rings) {
+        for (let i = 0; i < ring.length - 1; i++) {
+          const [lo0, la0] = ring[i], [lo1, la1] = ring[i + 1];
+          if (Math.abs(lo1 - lo0) > 90) continue;   // skip antimeridian jumps
+          buf.push(ll2v3(la0, lo0, 1.003), ll2v3(la1, lo1, 1.003));
+        }
+      }
+    }
+  }
+
+  for (const [key, segs] of Object.entries(segsPerRegion)) {
+    const pos = [];
+    for (const v of segs) pos.push(v.x, v.y, v.z);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xffeebb, transparent: true, opacity: 0, depthWrite: false,
+    });
+    const lines = new THREE.LineSegments(geo, mat);
+    G_GROUP.add(lines);
+    regionBorders[key] = lines;
+  }
+}
+
+// ── Hover update ─────────────────────────────────────────────
+function updateHover(regionKey) {
+  if (regionKey === hoveredRegionKey) return;
+  hoveredRegionKey = regionKey;
+
+  // Show/hide border lines
+  for (const [k, lines] of Object.entries(regionBorders))
+    lines.material.opacity = k === regionKey ? 0.9 : 0;
+
+  // Redraw overlay canvas
+  const W = overlayCanvas.width, H = overlayCanvas.height;
+  overlayCtx.clearRect(0, 0, W, H);
+
+  if (regionKey) {
+    const reg = REGIONS[regionKey];
+    // Warm golden fill for the hovered region
+    overlayCtx.fillStyle = 'rgba(255, 224, 100, 0.18)';
+    for (const feat of (countryByRegion[regionKey] || []))
+      geoFill(overlayCtx, feat.geometry, W, H);
+
+    // Bright border lines on the overlay canvas too
+    overlayCtx.strokeStyle = 'rgba(255, 220, 80, 0.75)';
+    overlayCtx.lineWidth   = 1.5;
+    for (const feat of (countryByRegion[regionKey] || [])) {
+      overlayCtx.beginPath();
+      geoTrace(overlayCtx, feat.geometry, W, H);
+      overlayCtx.stroke();
+    }
+
+    // Region label tooltip near top-center
+    if (reg) showHoverLabel(reg.name);
+  } else {
+    hideHoverLabel();
+  }
+
+  overlayTex.needsUpdate = true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MARKER + RING GROUPS
+// ═══════════════════════════════════════════════════════════════
+const MARKERS = new THREE.Group();
+const RINGS   = new THREE.Group();
+G_GROUP.add(MARKERS);
+G_GROUP.add(RINGS);
+
+// ── 3D building helpers ───────────────────────────────────────
+function mkPart(geo, color) {
+  const m = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({
+    color, specular: 0x112233, shininess: 40,
+  }));
+  m.userData.origColor = color;
+  return m;
+}
+
+function placeGroup(group, lat, lon) {
+  const pos = ll2v3(lat, lon, 1.003);
+  const up  = pos.clone().normalize();
+  group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+  group.position.copy(pos);
+}
+
+// Set all child mesh colours — used for active/sabotaged state
+function setMarkerEnabled(marker, enabled) {
+  if (!marker) return;
+  marker.traverse(child => {
+    if (child.isMesh)
+      child.material.color.setHex(enabled ? (child.userData.origColor ?? 0x888888) : 0x555555);
+  });
+}
+
+// ── Lab: research facility ────────────────────────────────────
+function createLabMarker(lab, isPlayer) {
+  const CB = isPlayer ? 0x1e5220 : 0x521818;   // dark base / wing
+  const CM = isPlayer ? 0x2e8a32 : 0x8a2e2e;   // main body
+  const CR = isPlayer ? 0x3aaa3a : 0xaa3a3a;   // roof accent
+  const CA = isPlayer ? 0x88ee44 : 0xee8844;   // antenna
+
+  const g = new THREE.Group();
+
+  const fnd  = mkPart(new THREE.BoxGeometry(0.030, 0.003, 0.024), CB);
+  fnd.position.set(0, 0.0015, 0);
+
+  const body = mkPart(new THREE.BoxGeometry(0.018, 0.018, 0.014), CM);
+  body.position.set(0.002, 0.012, 0);
+
+  const roof = mkPart(new THREE.BoxGeometry(0.022, 0.0025, 0.018), CR);
+  roof.position.set(0.002, 0.0215, 0);
+
+  const wing = mkPart(new THREE.BoxGeometry(0.010, 0.011, 0.010), CB);
+  wing.position.set(-0.013, 0.0085, 0);
+
+  const mast = mkPart(new THREE.CylinderGeometry(0.0007, 0.0009, 0.024, 4), CA);
+  mast.position.set(0.005, 0.034, 0);
+
+  const cross = mkPart(new THREE.BoxGeometry(0.010, 0.001, 0.001), CA);
+  cross.position.set(0.005, 0.044, 0);
+
+  g.add(fnd, body, roof, wing, mast, cross);
+  placeGroup(g, lab.lat, lab.lon);
+  g.userData.labId    = lab.id;
+  g.userData.isPlayer = isPlayer;
+  MARKERS.add(g);
+  lab.marker = g;
+  return g;
+}
+
+// ── Reactor: containment vessel + cooling tower ───────────────
+function createReactorMarker(reactor, isPlayer) {
+  const CB = isPlayer ? 0x0e5238 : 0x602a08;   // dark base
+  const CM = isPlayer ? 0x1a7a5a : 0x8a4010;   // main vessel
+  const CD = isPlayer ? 0x2aaa7a : 0xcc6622;   // dome / band
+  const CC = isPlayer ? 0x226644 : 0x7a3818;   // cooling tower
+
+  const g = new THREE.Group();
+
+  const fnd = mkPart(new THREE.CylinderGeometry(0.020, 0.022, 0.004, 10), CB);
+  fnd.position.set(0, 0.002, 0);
+
+  const vessel = mkPart(new THREE.CylinderGeometry(0.015, 0.015, 0.022, 10), CM);
+  vessel.position.set(0, 0.015, 0);
+
+  const band = mkPart(new THREE.TorusGeometry(0.016, 0.0018, 4, 14), CD);
+  band.position.set(0, 0.012, 0);
+  band.rotation.x = Math.PI / 2;
+
+  const dome = mkPart(new THREE.ConeGeometry(0.015, 0.013, 10), CD);
+  dome.position.set(0, 0.032, 0);
+
+  const cool = mkPart(new THREE.CylinderGeometry(0.005, 0.011, 0.030, 8), CC);
+  cool.position.set(0.017, 0.023, 0.005);
+
+  g.add(fnd, vessel, band, dome, cool);
+  placeGroup(g, reactor.lat, reactor.lon);
+  g.userData.reactorId = reactor.id;
+  MARKERS.add(g);
+  reactor.marker = g;
+  return g;
+}
+
+// ── Jammer: signal transmission tower ────────────────────────
+function createJammerMarker(jammer, isPlayer) {
+  const CB = isPlayer ? 0xaa7700 : 0x991400;   // base structure
+  const CM = isPlayer ? 0xddaa00 : 0xdd2200;   // mast / arms
+  const CT = isPlayer ? 0xffdd22 : 0xff4422;   // tip
+
+  const g = new THREE.Group();
+
+  const pad = mkPart(new THREE.BoxGeometry(0.014, 0.003, 0.014), CB);
+  pad.position.set(0, 0.0015, 0);
+
+  const mast = mkPart(new THREE.CylinderGeometry(0.0010, 0.0013, 0.050, 4), CM);
+  mast.position.set(0, 0.028, 0);
+
+  const arm1 = mkPart(new THREE.BoxGeometry(0.038, 0.0012, 0.0012), CM);
+  arm1.position.set(0, 0.013, 0);
+
+  const arm2 = mkPart(new THREE.BoxGeometry(0.028, 0.0012, 0.0012), CM);
+  arm2.position.set(0, 0.026, 0);
+
+  const arm3 = mkPart(new THREE.BoxGeometry(0.018, 0.0012, 0.0012), CM);
+  arm3.position.set(0, 0.037, 0);
+
+  const tip = mkPart(new THREE.SphereGeometry(0.003, 5, 4), CT);
+  tip.position.set(0, 0.054, 0);
+
+  g.add(pad, mast, arm1, arm2, arm3, tip);
+  placeGroup(g, jammer.lat, jammer.lon);
+  g.userData.jammerId = jammer.id;
+  MARKERS.add(g);
+  jammer.marker = g;
+  return g;
+}
+
+// ── Silo: underground launch facility + emerging missile ──────
+function createSiloMarker(silo, isPlayer) {
+  const CR = isPlayer ? 0x1a3a7a : 0x7a1a1a;   // outer rim
+  const CS = isPlayer ? 0x080814 : 0x100808;   // inner shaft (dark)
+  const CM = isPlayer ? 0xb0c4de : 0xe0c0b8;   // missile body
+  const CN = isPlayer ? 0xd0e8ff : 0xffd0c8;   // nose cone
+
+  const g = new THREE.Group();
+
+  const rim = mkPart(new THREE.CylinderGeometry(0.018, 0.020, 0.007, 12), CR);
+  rim.position.set(0, 0.0035, 0);
+
+  const shaft = mkPart(new THREE.CylinderGeometry(0.012, 0.012, 0.007, 10), CS);
+  shaft.position.set(0, 0.0035, 0);
+
+  const mbody = mkPart(new THREE.CylinderGeometry(0.005, 0.007, 0.038, 8), CM);
+  mbody.position.set(0, 0.026, 0);
+
+  const nose = mkPart(new THREE.ConeGeometry(0.006, 0.016, 8), CN);
+  nose.position.set(0, 0.053, 0);
+
+  g.add(rim, shaft, mbody, nose);
+  placeGroup(g, silo.lat, silo.lon);
+  g.userData.siloId = silo.id;
+  MARKERS.add(g);
+  silo.marker = g;
+  return g;
+}
+
+function createFogMarker(lat, lon, regionId) {
+  const pos = ll2v3(lat, lon, 1.003);
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.012, 0.022, 8),
+    new THREE.MeshBasicMaterial({ color: 0x5577aa, transparent: true, opacity: 0.65, side: THREE.DoubleSide })
+  );
+  ring.position.copy(pos);
+  const up = pos.clone().normalize();
+  ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), up);
+  ring.userData.isFog    = true;
+  ring.userData.regionId = regionId;
+  MARKERS.add(ring);
+  return ring;
+}
+
+function spawnOpRing(lat, lon, color = 0x4a9acc) {
+  const pos = ll2v3(lat, lon, 1.004);
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.018, 0.028, 32),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
+  );
+  ring.position.copy(pos);
+  const up = pos.clone().normalize();
+  ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), up);
+  ring.userData.born = Date.now();
+  RINGS.add(ring);
+  return ring;
+}
+
+// Search-area pulse: a large ring that expands slowly from the RECON point
+// to give the player a sense of the radius that was searched.
+function spawnSearchPulse(lat, lon) {
+  const pos = ll2v3(lat, lon, 1.004);
+  const mesh = new THREE.Mesh(
+    new THREE.RingGeometry(0.13, 0.16, 48),
+    new THREE.MeshBasicMaterial({ color: 0x44ffaa, transparent: true, opacity: 0.7, side: THREE.DoubleSide })
+  );
+  mesh.position.copy(pos);
+  const up = pos.clone().normalize();
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), up);
+  mesh.userData.born      = Date.now();
+  mesh.userData.isPulse   = true;   // slower fade, less expansion
+  RINGS.add(mesh);
+}
+
+// Fog marker tracking
+const fogMarkers = [];
+
+function refreshFogMarkers() {
+  // Remove old fog markers
+  for (const m of fogMarkers) MARKERS.remove(m);
+  fogMarkers.length = 0;
+
+  for (const regionId of state.player.knownEnemyRegions) {
+    const region = REGIONS[regionId];
+    if (!region) continue;
+    const aiLabsHere = state.ai.labs.filter(l => l.region?.id === regionId);
+    const revealedHere = state.player.revealedEnemyLabs.filter(r => r.lab.region?.id === regionId);
+    if (aiLabsHere.length > revealedHere.length) {
+      const clat = (region.latMin + region.latMax) / 2;
+      const clon = (region.lonMin + region.lonMax) / 2;
+      const m = createFogMarker(clat, clon, regionId);
+      fogMarkers.push(m);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CAMERA CONTROLS
+// ═══════════════════════════════════════════════════════════════
+const cvs = renderer.domElement;
+let drag = false, dragDist = 0;
+let mx0 = 0, my0 = 0, mxc = 0, myc = 0;
+
+cvs.addEventListener('mousedown', e => {
+  drag = true; dragDist = 0;
+  mx0 = mxc = e.clientX; my0 = myc = e.clientY;
+});
+
+cvs.addEventListener('mousemove', e => {
+  if (drag) {
+    const dx = e.clientX - mxc, dy = e.clientY - myc;
+    dragDist += Math.hypot(dx, dy);
+    mxc = e.clientX; myc = e.clientY;
+    G_GROUP.rotation.y += dx * 0.006;
+    G_GROUP.rotation.x = Math.max(-1.4, Math.min(1.4, G_GROUP.rotation.x + dy * 0.006));
+    return;
+  }
+  // Hover detection
+  const hit = raycastSphere(e.clientX, e.clientY);
+  const reg = hit ? getRegion(hit.lat, hit.lon) : null;
+  updateHover(reg ? reg.id : null);
+  cvs.style.cursor = reg ? 'crosshair' : 'default';
+});
+
+cvs.addEventListener('mouseup', e => {
+  if (drag && dragDist < 5) handleClick(e);
+  drag = false;
+});
+
+cvs.addEventListener('mouseleave', () => {
+  updateHover(null);
+  cvs.style.cursor = 'default';
+});
+
+cvs.addEventListener('wheel', e => {
+  camera.position.z = Math.max(1.6, Math.min(5.5, camera.position.z + e.deltaY * 0.002));
+  e.preventDefault();
+}, { passive: false });
+
+// ═══════════════════════════════════════════════════════════════
+//  RAYCASTING
+// ═══════════════════════════════════════════════════════════════
+const raycaster = new THREE.Raycaster();
+const mouse2d   = new THREE.Vector2();
+
+function raycastSphere(cx, cy) {
+  mouse2d.x = (cx / window.innerWidth)  *  2 - 1;
+  mouse2d.y = (cy / window.innerHeight) * -2 + 1;
+  raycaster.setFromCamera(mouse2d, camera);
+  const hits = raycaster.intersectObject(oceanMesh);
+  if (!hits.length) return null;
+  const local = G_GROUP.worldToLocal(hits[0].point.clone());
+  return v3ToLL(local);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CLICK HANDLING
+// ═══════════════════════════════════════════════════════════════
+function handleClick(e) {
+  closeCtx();
+  const hit = raycastSphere(e.clientX, e.clientY);
+  if (!hit) return;
+  const { lat, lon } = hit;
+  const region = getRegion(lat, lon);
+
+  if (state.siloMode)    { doBuildSilo(lat, lon, region);    exitSiloMode();    return; }
+  if (state.reactorMode) { doBuildReactor(lat, lon, region); exitReactorMode(); return; }
+  if (state.jammerMode)  { doBuildJammer(lat, lon, region);  exitJammerMode();  return; }
+
+  if (state.buildMode) {
+    doBuildLab(lat, lon, region);
+    exitBuildMode();
+    return;
+  }
+
+  if (state.pendingOp) {
+    SFX.opLaunch();
+    doLaunchOp(state.pendingOp, lat, lon, region);
+    state.pendingOp = null;
+    clearOpBtns();
+    return;
+  }
+
+  openCtxMenu(e.clientX, e.clientY, lat, lon, region);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CONTEXT MENU
+// ═══════════════════════════════════════════════════════════════
+const ctxEl = document.getElementById('ctx-menu');
+let ctxTarget = { lat: 0, lon: 0, region: null };
+
+function openCtxMenu(px, py, lat, lon, region) {
+  ctxTarget = { lat, lon, region };
+  const p = state.player;
+  const canLab     = p.credits >= C.LAB_COST     && isOnLand(lat, lon);
+  const canJam     = p.credits >= C.JAMMER_COST  && isOnLand(lat, lon);
+  const canReactor = p.credits >= C.REACTOR_COST && isOnLand(lat, lon);
+  const canSilo    = p.credits >= C.SILO_COST    && isOnLand(lat, lon) && !p.silo;
+  const canR    = p.credits >= OPS.RECON.cost;
+  const canSt   = p.credits >= OPS.STEAL.cost;
+  const canSab  = p.credits >= OPS.SABOTAGE.cost;
+  const rname   = region ? region.name : 'Ocean';
+
+  ctxEl.innerHTML = `
+    <div class="ctx-hdr">${rname} — ${lat.toFixed(1)}°, ${lon.toFixed(1)}°</div>
+    <div class="ctx-row ${canLab ? '' : 'off'}" id="ctx-lab">
+      Place Lab <span class="ctx-c">500c</span>
+    </div>
+    <div class="ctx-row ${canJam ? '' : 'off'}" id="ctx-jammer">
+      Deploy Jammer <span class="ctx-c">${C.JAMMER_COST}c</span>
+    </div>
+    <div class="ctx-row ${canReactor ? '' : 'off'}" id="ctx-reactor">
+      Build Reactor <span class="ctx-c">${C.REACTOR_COST}c</span>
+    </div>
+    <div class="ctx-row ${canSilo ? '' : 'off'}" id="ctx-silo">
+      Build Silo <span class="ctx-c">${C.SILO_COST}c</span>
+    </div>
+    <hr class="ctx-div">
+    <div class="ctx-row ${canR   ? '' : 'off'}" id="ctx-recon">
+      RECON <span class="ctx-c">300c · 65%</span>
+    </div>
+    <div class="ctx-row ${canSt  ? '' : 'off'}" id="ctx-steal">
+      STEAL <span class="ctx-c">500c · 45%</span>
+    </div>
+    <div class="ctx-row ${canSab ? '' : 'off'}" id="ctx-sab">
+      SABOTAGE <span class="ctx-c">700c · 40%</span>
+    </div>
+  `;
+
+  if (canLab)  ctxEl.querySelector('#ctx-lab').onclick    = () => { closeCtx(); doBuildLab(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canJam)     ctxEl.querySelector('#ctx-jammer').onclick  = () => { closeCtx(); doBuildJammer(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canReactor) ctxEl.querySelector('#ctx-reactor').onclick = () => { closeCtx(); doBuildReactor(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canSilo)    ctxEl.querySelector('#ctx-silo').onclick    = () => { closeCtx(); doBuildSilo(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canR)    ctxEl.querySelector('#ctx-recon').onclick  = () => { closeCtx(); doLaunchOp('RECON',    ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canSt)   ctxEl.querySelector('#ctx-steal').onclick  = () => { closeCtx(); doLaunchOp('STEAL',    ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canSab)  ctxEl.querySelector('#ctx-sab').onclick    = () => { closeCtx(); doLaunchOp('SABOTAGE', ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+
+  ctxEl.style.display = 'block';
+  ctxEl.style.left    = Math.min(px, window.innerWidth  - 210) + 'px';
+  ctxEl.style.top     = Math.min(py, window.innerHeight - 180) + 'px';
+}
+
+function closeCtx() { ctxEl.style.display = 'none'; }
+
+document.addEventListener('mousedown', e => {
+  if (!ctxEl.contains(e.target) && e.target !== cvs) closeCtx();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  BUILD MODE
+// ═══════════════════════════════════════════════════════════════
+function enterBuildMode() {
+  if (state.player.credits < C.LAB_COST) { toast(`Need ${C.LAB_COST}c to build a lab`); return; }
+  exitJammerMode(); exitReactorMode(); exitSiloMode();
+  state.buildMode = true;
+  state.pendingOp = null;
+  clearOpBtns();
+  showTargetInd(`Click globe to place lab (${C.LAB_COST}c) — ESC to cancel`);
+  document.getElementById('btn-build').classList.add('active');
+}
+
+function exitBuildMode() {
+  state.buildMode = false;
+  hideTargetInd();
+  document.getElementById('btn-build').classList.remove('active');
+}
+
+function doBuildLab(lat, lon, region) {
+  const p = state.player;
+  if (p.credits < C.LAB_COST) { toast('Not enough credits!'); return; }
+  if (!isOnLand(lat, lon)) { toast('Labs must be built on land!'); return; }
+  p.credits -= C.LAB_COST;
+  const lab = new Lab(lat, lon, region, 'player');
+  p.addLab(lab);
+  createLabMarker(lab, true);
+  SFX.buildLab();
+  log(`Lab built in ${region ? region.name : 'Ocean'}`, 'ok');
+  toast(`Lab placed! (+${C.SCI_PER_LAB} sci/s)`);
+  if (MP.active) MP.send('BUILD_LAB', { id: lab.id, lat, lon, regionId: region?.id || null });
+  updateUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ICBM LAUNCH ANIMATION
+// ═══════════════════════════════════════════════════════════════
+function launchICBM(fromLat, fromLon, toLat, toLon, onArrival) {
+  SFX.icbmLaunch();
+  // Positions in globe-local space so they rotate with the planet
+  const start = ll2v3(fromLat, fromLon, 1.0);
+  const end   = ll2v3(toLat,   toLon,   1.0);
+  const ctrl  = start.clone().add(end).multiplyScalar(0.5).normalize().multiplyScalar(1.55);
+  const curve = new THREE.QuadraticBezierCurve3(start, ctrl, end);
+
+  const missileMat = new THREE.MeshBasicMaterial({ color: 0xff6600 });
+  const missile    = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), missileMat);
+  G_GROUP.add(missile);
+
+  const MAX_TRAIL  = 80;
+  const trailPts   = [];
+  const trailGeo   = new THREE.BufferGeometry();
+  const trailMat2  = new THREE.LineBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.75 });
+  const trailLine  = new THREE.Line(trailGeo, trailMat2);
+  G_GROUP.add(trailLine);
+
+  const DURATION  = 7000;
+  const startTime = performance.now();
+
+  function tick() {
+    const t   = Math.min(1, (performance.now() - startTime) / DURATION);
+    const pos = curve.getPoint(t);
+    missile.position.copy(pos);
+
+    trailPts.push(pos.clone());
+    if (trailPts.length > MAX_TRAIL) trailPts.shift();
+    const flat = [];
+    for (const p of trailPts) flat.push(p.x, p.y, p.z);
+    trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
+    trailGeo.setDrawRange(0, trailPts.length);
+
+    if (t < 1) {
+      requestAnimationFrame(tick);
+    } else {
+      G_GROUP.remove(missile); G_GROUP.remove(trailLine);
+      missile.geometry.dispose(); missileMat.dispose();
+      trailGeo.dispose(); trailMat2.dispose();
+
+      // Explosion flash at target
+      const flashMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.07, 10, 10),
+        new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.95 })
+      );
+      flashMesh.position.copy(end);
+      G_GROUP.add(flashMesh);
+      let age = 0;
+      const fade = setInterval(() => {
+        age += 0.08;
+        flashMesh.material.opacity = 0.95 * (1 - age);
+        flashMesh.scale.setScalar(1 + age * 3);
+        if (age >= 1) { clearInterval(fade); G_GROUP.remove(flashMesh); flashMesh.geometry.dispose(); }
+      }, 30);
+
+      SFX.icbmImpact();
+      if (onArrival) onArrival();
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  JAMMER PLACEMENT
+// ═══════════════════════════════════════════════════════════════
+function enterJammerMode() {
+  if (state.player.credits < C.JAMMER_COST) { toast(`Need ${C.JAMMER_COST}c to deploy jammer`); return; }
+  exitBuildMode(); exitReactorMode(); exitSiloMode();
+  state.jammerMode = true;
+  state.pendingOp = null;
+  clearOpBtns();
+  showTargetInd(`Click globe to deploy jammer (${C.JAMMER_COST}c) — ESC to cancel`);
+  document.getElementById('btn-jammer').classList.add('active');
+}
+
+function exitJammerMode() {
+  state.jammerMode = false;
+  document.getElementById('btn-jammer')?.classList.remove('active');
+  if (!state.buildMode && !state.pendingOp) hideTargetInd();
+}
+
+function doBuildJammer(lat, lon, region) {
+  const p = state.player;
+  if (p.credits < C.JAMMER_COST) { toast('Not enough credits!'); return; }
+  if (!isOnLand(lat, lon)) { toast('Jammers must be on land!'); return; }
+  p.credits -= C.JAMMER_COST;
+  const jammer = new Jammer(lat, lon, region, 'player');
+  p.jammers.push(jammer);
+  createJammerMarker(jammer, true);
+  SFX.buildJammer();
+  log(`Jammer deployed in ${region ? region.name : 'unknown'}`, 'ok');
+  toast('Jammer deployed! Defensive near your labs, offensive near theirs.');
+  if (MP.active) MP.send('BUILD_JAMMER', { id: jammer.id, lat, lon, regionId: region?.id || null });
+  updateUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  REACTOR PLACEMENT
+// ═══════════════════════════════════════════════════════════════
+function enterReactorMode() {
+  if (state.player.credits < C.REACTOR_COST) { toast(`Need ${C.REACTOR_COST}c to build reactor`); return; }
+  exitBuildMode(); exitJammerMode(); exitSiloMode();
+  state.reactorMode = true;
+  state.pendingOp = null;
+  clearOpBtns();
+  showTargetInd(`Click globe to build reactor (${C.REACTOR_COST}c) — ESC to cancel`);
+  document.getElementById('btn-reactor').classList.add('active');
+}
+
+function exitReactorMode() {
+  state.reactorMode = false;
+  document.getElementById('btn-reactor')?.classList.remove('active');
+  if (!state.buildMode && !state.jammerMode && !state.siloMode && !state.pendingOp) hideTargetInd();
+}
+
+function doBuildReactor(lat, lon, region) {
+  const p = state.player;
+  if (p.credits < C.REACTOR_COST) { toast('Not enough credits!'); return; }
+  if (!isOnLand(lat, lon)) { toast('Reactors must be on land!'); return; }
+  p.credits -= C.REACTOR_COST;
+  const reactor = new Reactor(lat, lon, region, 'player');
+  p.reactors.push(reactor);
+  createReactorMarker(reactor, true);
+  SFX.buildReactor();
+  log(`Reactor built in ${region ? region.name : 'unknown'} (+${C.DU_PER_REACTOR} uranium/s)`, 'ok');
+  toast(`Reactor online! +${C.DU_PER_REACTOR} uranium/s`);
+  if (MP.active) MP.send('BUILD_REACTOR', { id: reactor.id, lat, lon, regionId: region?.id || null });
+  updateUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SILO PLACEMENT
+// ═══════════════════════════════════════════════════════════════
+function enterSiloMode() {
+  const p = state.player;
+  if (p.credits < C.SILO_COST) { toast(`Need ${C.SILO_COST}c to build silo`); return; }
+  if (p.silo) { toast('You already have a rocket silo!'); return; }
+  exitBuildMode(); exitJammerMode(); exitReactorMode();
+  state.siloMode = true;
+  state.pendingOp = null;
+  clearOpBtns();
+  showTargetInd(`Click globe to build rocket silo (${C.SILO_COST}c) — ESC to cancel`);
+  document.getElementById('btn-silo').classList.add('active');
+}
+
+function exitSiloMode() {
+  state.siloMode = false;
+  document.getElementById('btn-silo')?.classList.remove('active');
+  if (!state.buildMode && !state.jammerMode && !state.reactorMode && !state.pendingOp) hideTargetInd();
+}
+
+function doBuildSilo(lat, lon, region) {
+  const p = state.player;
+  if (p.credits < C.SILO_COST) { toast('Not enough credits!'); return; }
+  if (p.silo) { toast('Already have a silo!'); return; }
+  if (!isOnLand(lat, lon)) { toast('Silo must be on land!'); return; }
+  p.credits -= C.SILO_COST;
+  const silo = new Silo(lat, lon, region, 'player');
+  p.silo = silo;
+  createSiloMarker(silo, true);
+  SFX.buildSilo();
+  log(`Rocket silo built in ${region ? region.name : 'unknown'}`, 'ok');
+  toast('Rocket silo ready! Reach 100% science + uranium to launch.');
+  if (MP.active) MP.send('BUILD_SILO', { id: silo.id, lat, lon, regionId: region?.id || null });
+  updateUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SWEEP
+// ═══════════════════════════════════════════════════════════════
+function doSweep() {
+  const p = state.player;
+  if (p.credits < C.SWEEP_COST) { toast(`Need ${C.SWEEP_COST}c for SWEEP`); return; }
+  p.credits -= C.SWEEP_COST;
+
+  let found = 0;
+  const scanPoints = [
+    ...p.labs.map(l => ll2v3(l.lat, l.lon)),
+    ...p.reactors.map(r => ll2v3(r.lat, r.lon)),
+    ...(p.silo ? [ll2v3(p.silo.lat, p.silo.lon)] : []),
+  ];
+
+  for (const sv of scanPoints) {
+    for (const jammer of state.ai.jammers) {
+      if (p.revealedEnemyJammers.some(r => r.id === jammer.id)) continue;
+      if (sv.distanceTo(ll2v3(jammer.lat, jammer.lon)) <= C.SWEEP_RADIUS) {
+        p.revealedEnemyJammers.push(jammer); createJammerMarker(jammer, false); found++;
+      }
+    }
+    for (const reactor of state.ai.reactors) {
+      if (p.revealedEnemyReactors.some(r => r.id === reactor.id)) continue;
+      if (sv.distanceTo(ll2v3(reactor.lat, reactor.lon)) <= C.SWEEP_RADIUS) {
+        p.revealedEnemyReactors.push(reactor); createReactorMarker(reactor, false); found++;
+      }
+    }
+    if (!p.revealedEnemySilo && state.ai.silo) {
+      if (sv.distanceTo(ll2v3(state.ai.silo.lat, state.ai.silo.lon)) <= C.SWEEP_RADIUS) {
+        p.revealedEnemySilo = state.ai.silo; createSiloMarker(state.ai.silo, false); found++;
+      }
+    }
+  }
+
+  SFX.sweep();
+  if (found > 0) {
+    log(`SWEEP: ${found} enemy structure(s) detected!`, 'ok');
+    toast(`${found} structure(s) revealed — SABOTAGE to destroy!`);
+  } else {
+    log('SWEEP: Nothing detected near your structures', 'imp');
+    toast('Nothing detected near your structures');
+  }
+  updateUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OPERATION SELECTION + LAUNCH
+// ═══════════════════════════════════════════════════════════════
+function selectOp(type) {
+  if (state.player.credits < OPS[type].cost) { toast(`Need ${OPS[type].cost}c`); return; }
+  exitBuildMode();
+  state.pendingOp = type;
+  clearOpBtns();
+  const btn = document.getElementById(`btn-${type.toLowerCase()}`);
+  if (btn) btn.classList.add('active');
+  showTargetInd(`${type}: Click globe to target — ESC to cancel`);
+}
+
+function clearOpBtns() {
+  ['recon','steal','sabotage'].forEach(t => {
+    document.getElementById(`btn-${t}`)?.classList.remove('active');
+  });
+  if (!state.buildMode) hideTargetInd();
+}
+
+function doLaunchOp(type, lat, lon, region) {
+  const p = state.player;
+  if (p.credits < OPS[type].cost) { toast('Not enough credits!'); return; }
+  p.credits -= OPS[type].cost;
+  const op = new Operation(type, lat, lon, region);
+  p.ops.push(op);
+  op.ring = spawnOpRing(lat, lon, type === 'RECON' ? 0x44cc88 : 0x4aaacc);
+  log(`${type} launched → ${lat.toFixed(1)}°, ${lon.toFixed(1)}°`, 'imp');
+  updateUI();
+  if (MP.active) {
+    // Multiplayer: send to opponent (defender) to resolve, then receive OP_RESULT
+    MP.pendingOps[op.id] = op;
+    setTimeout(() => {
+      if (op.done) return;  // already resolved (shouldn't happen, but guard)
+      if (MP.conn?.open) {
+        MP.send('LAUNCH_OP', { opId: op.id, type, lat, lon, regionId: region?.id || null });
+      } else {
+        // Disconnected — clear op ring
+        op.done = true;
+        if (op.ring) { RINGS.remove(op.ring); op.ring = null; }
+        log(`${type} aborted — opponent disconnected`, 'warn');
+      }
+    }, OPS[type].duration);
+  } else {
+    setTimeout(() => resolveOp(op, state.player, state.ai), OPS[type].duration);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OPERATION RESOLUTION
+// ═══════════════════════════════════════════════════════════════
+function resolveOp(op, attacker, defender) {
+  op.done = true;
+  if (op.ring) { RINGS.remove(op.ring); op.ring = null; }
+
+  // Detection chance
+  if (attacker === state.player && Math.random() < C.DETECT_CHANCE) {
+    log('⚠ Your agent was detected!', 'warn');
+    state.ai.estimatedEnemySci.min = Math.max(0,   state.player.science - 15);
+    state.ai.estimatedEnemySci.max = Math.min(100, state.player.science + 15);
+  }
+
+  const bonus   = attacker === state.player ? (nationBonuses[op.type] || 0) : 0;
+
+  // Jammer defense: defender's jammers near the target reduce op success
+  const targetV       = ll2v3(op.lat, op.lon);
+  const jammed        = defender.jammers.some(j => targetV.distanceTo(ll2v3(j.lat, j.lon)) <= C.JAMMER_RADIUS);
+  const jammerPenalty = jammed ? C.JAMMER_DEF_PENALTY : 0;
+
+  const success = Math.random() < Math.max(0.05, OPS[op.type].success + bonus - jammerPenalty);
+  if (!success) {
+    if (attacker === state.player) { log(`${op.type} FAILED${jammed ? ' — jammer interference' : ''}`, 'warn'); SFX.opFail(); }
+    return;
+  }
+
+  // ── RECON ──────────────────────────────────────
+  if (op.type === 'RECON') {
+    if (attacker === state.player) {
+      // Radius-based search: find all enemy labs within RECON_RADIUS of clicked point
+      const origin = ll2v3(op.lat, op.lon);
+      const inRadius = defender.labs.filter(
+        l => origin.distanceTo(ll2v3(l.lat, l.lon)) <= C.RECON_RADIUS
+      );
+      const unrevealed = inRadius.filter(
+        l => !attacker.revealedEnemyLabs.some(r => r.lab.id === l.id)
+      );
+
+      // Pulse ring to show the searched area
+      spawnSearchPulse(op.lat, op.lon);
+
+      if (unrevealed.length > 0) {
+        for (const lab of unrevealed) {
+          attacker.revealedEnemyLabs.push({ lab });
+          createLabMarker(lab, false);
+          if (lab.region) attacker.knownEnemyRegions.add(lab.region.id);
+        }
+        bumpdEstimate(attacker, defender, 10);
+        log(`RECON SUCCESS: ${unrevealed.length} lab(s) found in search area!`, 'ok');
+        toast(`${unrevealed.length} enemy lab(s) revealed!`);
+        refreshFogMarkers();
+      } else if (inRadius.length > 0) {
+        log(`RECON: Area searched — all labs there already known`, 'imp');
+      } else {
+        log(`RECON: Nothing found in search area`, 'imp');
+        bumpdEstimate(attacker, defender, 20);
+      }
+
+      // Also reveal jammers, reactors, and silo within RECON radius
+      const jammersFound = defender.jammers.filter(j =>
+        !attacker.revealedEnemyJammers.some(r => r.id === j.id) &&
+        origin.distanceTo(ll2v3(j.lat, j.lon)) <= C.RECON_RADIUS
+      );
+      for (const j of jammersFound) { attacker.revealedEnemyJammers.push(j); createJammerMarker(j, false); }
+
+      const reactorsFound = defender.reactors.filter(r =>
+        !attacker.revealedEnemyReactors.some(x => x.id === r.id) &&
+        origin.distanceTo(ll2v3(r.lat, r.lon)) <= C.RECON_RADIUS
+      );
+      for (const r of reactorsFound) { attacker.revealedEnemyReactors.push(r); createReactorMarker(r, false); }
+
+      if (!attacker.revealedEnemySilo && defender.silo &&
+          origin.distanceTo(ll2v3(defender.silo.lat, defender.silo.lon)) <= C.RECON_RADIUS) {
+        attacker.revealedEnemySilo = defender.silo;
+        createSiloMarker(defender.silo, false);
+        log('RECON: Enemy ROCKET SILO located! SABOTAGE it!', 'ok');
+      }
+
+      const hidden = jammersFound.length + reactorsFound.length;
+      if (hidden > 0)
+        log(`RECON: Detected ${hidden} enemy hidden structure(s)!`, 'ok');
+      SFX.opSuccess();
+    }
+    // AI RECON — update its estimate
+    if (attacker === state.ai) {
+      bumpdEstimate(attacker, defender, 10);
+    }
+  }
+
+  // ── STEAL ──────────────────────────────────────
+  else if (op.type === 'STEAL') {
+    const gain = 8, loss = 4;
+    attacker.science = Math.min(100, attacker.science + gain);
+    defender.science = Math.max(0,   defender.science - loss);
+    if (attacker === state.player) {
+      SFX.opSuccess();
+      log(`STEAL SUCCESS: +${gain}% science!`, 'ok');
+      toast(`+${gain}% science stolen!`);
+      bumpdEstimate(attacker, defender, 10);
+    } else {
+      SFX.alert();
+      log(`⚠ Enemy stole your science! −${loss}%`, 'danger');
+      toast(`Enemy stole your science! −${loss}%`);
+    }
+  }
+
+  // ── SABOTAGE ───────────────────────────────────
+  else if (op.type === 'SABOTAGE') {
+    const t3 = ll2v3(op.lat, op.lon);
+    const candidates = [];
+
+    for (const lab of defender.labs) {
+      if (!lab.isActive()) continue;
+      candidates.push({ kind: 'lab', obj: lab, dist: t3.distanceTo(ll2v3(lab.lat, lab.lon)) });
+    }
+    for (const j of attacker.revealedEnemyJammers) {
+      if (j.ownerId === defender.id)
+        candidates.push({ kind: 'jammer', obj: j, dist: t3.distanceTo(ll2v3(j.lat, j.lon)) });
+    }
+    for (const r of attacker.revealedEnemyReactors) {
+      if (r.ownerId === defender.id)
+        candidates.push({ kind: 'reactor', obj: r, dist: t3.distanceTo(ll2v3(r.lat, r.lon)) });
+    }
+    if (attacker.revealedEnemySilo?.ownerId === defender.id) {
+      const s = attacker.revealedEnemySilo;
+      candidates.push({ kind: 'silo', obj: s, dist: t3.distanceTo(ll2v3(s.lat, s.lon)) });
+    }
+
+    candidates.sort((a, b) => a.dist - b.dist);
+    const hit = candidates.length > 0 && candidates[0].dist < 0.55 ? candidates[0] : null;
+
+    if (!hit) {
+      if (attacker === state.player) { log('SABOTAGE: No valid target in range', 'warn'); SFX.opFail(); }
+
+    } else if (hit.kind === 'lab') {
+      hit.obj.disabledUntil = Date.now() + C.SABOTAGE_DUR;
+      if (attacker === state.player) {
+        SFX.opSuccess();
+        log('SABOTAGE SUCCESS: Enemy lab disabled 2min!', 'ok'); toast('Enemy lab sabotaged!');
+        if (defender.interruptAssembly()) { log('⚡ Enemy assembly INTERRUPTED!', 'ok'); toast('Enemy ASSEMBLY INTERRUPTED!'); }
+      } else {
+        SFX.alert();
+        if (hit.obj.marker) setMarkerEnabled(hit.obj.marker, false);
+        log('⚠ Your lab was sabotaged! Offline 2min', 'danger'); toast('Your lab sabotaged — offline 2min!');
+        if (defender.interruptAssembly()) { log('⚡ Your assembly was INTERRUPTED!', 'danger'); toast('YOUR ASSEMBLY INTERRUPTED!'); }
+      }
+
+    } else if (hit.kind === 'jammer') {
+      const j = hit.obj;
+      if (j.marker) { MARKERS.remove(j.marker); j.marker = null; }
+      defender.jammers              = defender.jammers.filter(x => x.id !== j.id);
+      attacker.revealedEnemyJammers = attacker.revealedEnemyJammers.filter(x => x.id !== j.id);
+      if (attacker === state.player) { SFX.opSuccess(); log('SABOTAGE SUCCESS: Enemy jammer destroyed!', 'ok'); toast('Enemy jammer obliterated!'); }
+      else { SFX.destroyed(); log('⚠ Your jammer was destroyed!', 'danger'); toast('Your jammer was destroyed!'); }
+
+    } else if (hit.kind === 'reactor') {
+      const r = hit.obj;
+      if (r.marker) { MARKERS.remove(r.marker); r.marker = null; }
+      defender.reactors               = defender.reactors.filter(x => x.id !== r.id);
+      attacker.revealedEnemyReactors  = attacker.revealedEnemyReactors.filter(x => x.id !== r.id);
+      if (attacker === state.player) { SFX.opSuccess(); log('SABOTAGE SUCCESS: Enemy reactor destroyed! Uranium slows.', 'ok'); toast('Enemy reactor destroyed!'); }
+      else { SFX.destroyed(); log('⚠ Your reactor was destroyed!', 'danger'); toast('Your reactor was destroyed!'); }
+
+    } else if (hit.kind === 'silo') {
+      const s = hit.obj;
+      if (s.marker) { MARKERS.remove(s.marker); s.marker = null; }
+      defender.silo                = null;
+      attacker.revealedEnemySilo   = null;
+      const interrupted = defender.interruptAssembly();
+      if (attacker === state.player) {
+        SFX.opSuccess();
+        log('SABOTAGE SUCCESS: Enemy SILO destroyed!', 'ok');
+        if (interrupted) { log('⚡ Enemy LAUNCH ABORTED!', 'ok'); toast('Enemy silo destroyed — launch aborted!'); }
+        else toast('Enemy rocket silo obliterated!');
+      } else {
+        SFX.destroyed();
+        log('⚠ YOUR SILO WAS DESTROYED!', 'danger');
+        if (interrupted) { log('⚡ YOUR LAUNCH WAS ABORTED!', 'danger'); toast('Silo destroyed — build a new one!'); }
+        else toast('Your rocket silo was destroyed!');
+      }
+    }
+  }
+
+  updateUI();
+}
+
+function bumpdEstimate(attacker, defender, uncertainty) {
+  attacker.estimatedEnemySci.min = Math.max(0,   defender.science - uncertainty);
+  attacker.estimatedEnemySci.max = Math.min(100, defender.science + uncertainty);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AI LOGIC
+// ═══════════════════════════════════════════════════════════════
+function aiTick() {
+  if (state.gameOver) return;
+  const ai = state.ai;
+  const p  = state.player;
+
+  if (ai.science >= 100 && ai.depletedUranium >= 100 && ai.silo && !ai.assembling && !ai.assemblyDone) {
+    ai.startAssembly();
+    log('⚠ INTEL: Enemy has initiated assembly!', 'danger');
+    return;
+  }
+
+  const estPlayerSci = (ai.estimatedEnemySci.min + ai.estimatedEnemySci.max) / 2;
+
+  // Build a lab if affordable and under cap
+  if (ai.credits >= C.LAB_COST + 80 && ai.labs.length < 8) {
+    aiBuild(); return;
+  }
+
+  // Build reactors (need uranium to win)
+  if (ai.credits >= C.REACTOR_COST + 200 && ai.reactors.length < 3 && Math.random() < 0.55) {
+    aiBuildReactor(); return;
+  }
+
+  // Build silo (need it to win — wait until 2+ labs exist)
+  if (ai.credits >= C.SILO_COST + 200 && !ai.silo && ai.labs.length >= 2 && Math.random() < 0.65) {
+    aiBuildSilo(); return;
+  }
+
+  // Place a jammer (keep 300c buffer; max 4 jammers)
+  if (ai.credits >= C.JAMMER_COST + 300 && ai.jammers.length < 4 && Math.random() < 0.40) {
+    aiPlaceJammer(); return;
+  }
+
+  // Sweep for player jammers
+  if (ai.credits >= C.SWEEP_COST && Math.random() < 0.22) {
+    aiSweep(); return;
+  }
+
+  // Destroy a revealed player jammer
+  if (ai.revealedEnemyJammers.length > 0 && ai.credits >= OPS.SABOTAGE.cost && Math.random() < 0.75) {
+    aiOp('SABOTAGE'); return;
+  }
+
+  // Sabotage if significantly behind
+  if (ai.science < estPlayerSci - 20 && ai.credits >= OPS.SABOTAGE.cost && Math.random() < 0.55) {
+    aiOp('SABOTAGE'); return;
+  }
+
+  // Steal if behind
+  if (ai.science < estPlayerSci - 10 && ai.credits >= OPS.STEAL.cost && Math.random() < 0.60) {
+    aiOp('STEAL'); return;
+  }
+
+  // Random steal
+  if (ai.credits >= OPS.STEAL.cost && Math.random() < 0.35) {
+    aiOp('STEAL'); return;
+  }
+
+  // Random RECON
+  if (ai.credits >= OPS.RECON.cost && Math.random() < 0.30) {
+    aiOp('RECON');
+  }
+}
+
+function aiBuild() {
+  const ai = state.ai;
+  if (ai.credits < C.LAB_COST) return;
+  const keys = Object.keys(REGIONS);
+  let region, lat, lon, attempts = 0;
+  do {
+    region = REGIONS[keys[Math.floor(Math.random() * keys.length)]];
+    ({ lat, lon } = randInRegion(region));
+    attempts++;
+  } while (!isOnLand(lat, lon) && attempts < 30);
+  if (!isOnLand(lat, lon)) return;  // gave up — all sampled points were ocean
+  ai.credits -= C.LAB_COST;
+  const lab = new Lab(lat, lon, region, 'ai');
+  ai.addLab(lab);
+  console.log(`[AI] Lab built in ${region.name} (${lat.toFixed(1)}, ${lon.toFixed(1)})`);
+  refreshFogMarkers();
+}
+
+function aiSweep() {
+  const ai = state.ai;
+  const p  = state.player;
+  if (ai.credits < C.SWEEP_COST) return;
+  ai.credits -= C.SWEEP_COST;
+  let found = 0;
+
+  const scanPts = [
+    ...ai.labs.map(l => ll2v3(l.lat, l.lon)),
+    ...ai.reactors.map(r => ll2v3(r.lat, r.lon)),
+    ...(ai.silo ? [ll2v3(ai.silo.lat, ai.silo.lon)] : []),
+  ];
+
+  for (const sv of scanPts) {
+    for (const jammer of p.jammers) {
+      if (ai.revealedEnemyJammers.some(r => r.id === jammer.id)) continue;
+      if (sv.distanceTo(ll2v3(jammer.lat, jammer.lon)) <= C.SWEEP_RADIUS) {
+        ai.revealedEnemyJammers.push(jammer); found++;
+      }
+    }
+    for (const reactor of p.reactors) {
+      if (ai.revealedEnemyReactors.some(r => r.id === reactor.id)) continue;
+      if (sv.distanceTo(ll2v3(reactor.lat, reactor.lon)) <= C.SWEEP_RADIUS) {
+        ai.revealedEnemyReactors.push(reactor); found++;
+      }
+    }
+    if (!ai.revealedEnemySilo && p.silo) {
+      if (sv.distanceTo(ll2v3(p.silo.lat, p.silo.lon)) <= C.SWEEP_RADIUS) {
+        ai.revealedEnemySilo = p.silo; found++;
+      }
+    }
+  }
+  if (found > 0) log(`⚠ Enemy sweep detected ${found} of your structures!`, 'warn');
+  console.log(`[AI] SWEEP found ${found} player structure(s)`);
+}
+
+function aiBuildReactor() {
+  const ai = state.ai;
+  if (ai.credits < C.REACTOR_COST) return;
+  let lat, lon, region, attempts = 0;
+  do {
+    const keys = Object.keys(REGIONS);
+    region = REGIONS[keys[Math.floor(Math.random() * keys.length)]];
+    ({ lat, lon } = randInRegion(region));
+    attempts++;
+  } while (!isOnLand(lat, lon) && attempts < 30);
+  if (!isOnLand(lat, lon)) return;
+  ai.credits -= C.REACTOR_COST;
+  ai.reactors.push(new Reactor(lat, lon, region, 'ai'));
+  console.log(`[AI] Reactor built in ${region.name}`);
+}
+
+function aiBuildSilo() {
+  const ai = state.ai;
+  if (ai.credits < C.SILO_COST || ai.silo) return;
+  let lat, lon, region, attempts = 0;
+  do {
+    const keys = Object.keys(REGIONS);
+    region = REGIONS[keys[Math.floor(Math.random() * keys.length)]];
+    ({ lat, lon } = randInRegion(region));
+    attempts++;
+  } while (!isOnLand(lat, lon) && attempts < 30);
+  if (!isOnLand(lat, lon)) return;
+  ai.credits -= C.SILO_COST;
+  ai.silo = new Silo(lat, lon, region, 'ai');
+  console.log(`[AI] Silo built in ${region.name}`);
+}
+
+function aiPlaceJammer() {
+  const ai = state.ai;
+  const p  = state.player;
+  if (ai.credits < C.JAMMER_COST) return;
+
+  let lat, lon, region, attempts = 0;
+  const defensive = Math.random() < 0.5 && ai.labs.length > 0;
+
+  do {
+    if (defensive) {
+      const lab = ai.labs[Math.floor(Math.random() * ai.labs.length)];
+      lat = Math.max(-85, Math.min(85, lab.lat + (Math.random() - 0.5) * 5));
+      lon = lab.lon + (Math.random() - 0.5) * 5;
+      region = getRegion(lat, lon) || lab.region;
+    } else if (p.labs.length > 0) {
+      const lab = p.labs[Math.floor(Math.random() * p.labs.length)];
+      lat = Math.max(-85, Math.min(85, lab.lat + (Math.random() - 0.5) * 6));
+      lon = lab.lon + (Math.random() - 0.5) * 6;
+      region = getRegion(lat, lon) || lab.region;
+    } else {
+      const keys = Object.keys(REGIONS);
+      region = REGIONS[keys[Math.floor(Math.random() * keys.length)]];
+      ({ lat, lon } = randInRegion(region));
+    }
+    attempts++;
+  } while (!isOnLand(lat, lon) && attempts < 30);
+
+  if (!isOnLand(lat, lon)) return;
+  ai.credits -= C.JAMMER_COST;
+  const jammer = new Jammer(lat, lon, region, 'ai');
+  ai.jammers.push(jammer);
+  console.log(`[AI] Jammer placed ${defensive ? '(defensive)' : '(offensive)'} in ${region ? region.name : '?'}`);
+}
+
+function aiOp(type) {
+  const ai = state.ai;
+  const p  = state.player;
+  if (ai.credits < OPS[type].cost) return;
+  ai.credits -= OPS[type].cost;
+
+  let lat, lon, region;
+  // SABOTAGE priority: revealed silo > revealed reactors > revealed jammers > labs
+  if (type === 'SABOTAGE' && ai.revealedEnemySilo?.ownerId === p.id && Math.random() < 0.85) {
+    lat = ai.revealedEnemySilo.lat; lon = ai.revealedEnemySilo.lon; region = ai.revealedEnemySilo.region;
+  } else if (type === 'SABOTAGE' && ai.revealedEnemyReactors.length > 0 && Math.random() < 0.70) {
+    const t = ai.revealedEnemyReactors[Math.floor(Math.random() * ai.revealedEnemyReactors.length)];
+    lat = t.lat; lon = t.lon; region = t.region;
+  } else if (type === 'SABOTAGE' && ai.revealedEnemyJammers.length > 0 && Math.random() < 0.65) {
+    const t = ai.revealedEnemyJammers[Math.floor(Math.random() * ai.revealedEnemyJammers.length)];
+    lat = t.lat; lon = t.lon; region = t.region;
+  } else if (p.labs.length > 0) {
+    const t  = p.labs[Math.floor(Math.random() * p.labs.length)];
+    lat = t.lat; lon = t.lon; region = t.region;
+  } else {
+    const keys  = Object.keys(REGIONS);
+    region = REGIONS[keys[Math.floor(Math.random() * keys.length)]];
+    ({ lat, lon } = randInRegion(region));
+  }
+
+  const op = new Operation(type, lat, lon, region);
+  ai.ops.push(op);
+  console.log(`[AI] ${type} → ${region ? region.name : '?'}`);
+  setTimeout(() => resolveOp(op, state.ai, state.player), OPS[type].duration);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  GAME STATE + LOOP
+// ═══════════════════════════════════════════════════════════════
+const state = {
+  player:      null,
+  ai:          null,
+  gameOver:    false,
+  buildMode:   false,
+  jammerMode:  false,
+  reactorMode: false,
+  siloMode:    false,
+  pendingOp:   null,
+  lastUpdate:  0,
+  lastAiTick:  0,
+};
+
+function update() {
+  if (state.gameOver || !state.player || !state.ai) return;
+  const now = Date.now();
+  const dt  = (now - state.lastUpdate) / 1000;
+  state.lastUpdate = now;
+
+  const { player, ai } = state;
+
+  // Accumulate credits (local player always; AI only in single-player)
+  player.credits += player.creditsPerSec * dt;
+  if (!MP.active) ai.credits += ai.creditsPerSec * dt;
+
+  // Accumulate science (each lab checked for enemy jammer overlap → 50% penalty)
+  let pSciGain = 0;
+  for (const lab of player.activeLabs()) {
+    const lv   = ll2v3(lab.lat, lab.lon);
+    const mult = ai.jammers.some(j => lv.distanceTo(ll2v3(j.lat, j.lon)) <= C.JAMMER_RADIUS) ? 0.5 : 1.0;
+    pSciGain  += C.SCI_PER_LAB * mult;
+  }
+  player.science = Math.min(100, player.science + pSciGain * dt);
+  if (!MP.active) {
+    let aSciGain = 0;
+    for (const lab of ai.activeLabs()) {
+      const lv   = ll2v3(lab.lat, lab.lon);
+      const mult = player.jammers.some(j => lv.distanceTo(ll2v3(j.lat, j.lon)) <= C.JAMMER_RADIUS) ? 0.5 : 1.0;
+      aSciGain  += C.SCI_PER_LAB * mult;
+    }
+    ai.science = Math.min(100, ai.science + aSciGain * dt);
+  }
+
+  // Accumulate depleted uranium from reactors (jammer penalty applies)
+  let pDUGain = 0;
+  for (const r of player.reactors) {
+    const rv   = ll2v3(r.lat, r.lon);
+    const mult = ai.jammers.some(j => rv.distanceTo(ll2v3(j.lat, j.lon)) <= C.JAMMER_RADIUS) ? 0.5 : 1.0;
+    pDUGain   += C.DU_PER_REACTOR * mult;
+  }
+  player.depletedUranium = Math.min(100, player.depletedUranium + pDUGain * dt);
+  if (!MP.active) {
+    let aDUGain = 0;
+    for (const r of ai.reactors) {
+      const rv   = ll2v3(r.lat, r.lon);
+      const mult = player.jammers.some(j => rv.distanceTo(ll2v3(j.lat, j.lon)) <= C.JAMMER_RADIUS) ? 0.5 : 1.0;
+      aDUGain   += C.DU_PER_REACTOR * mult;
+    }
+    ai.depletedUranium = Math.min(100, ai.depletedUranium + aDUGain * dt);
+  }
+
+  // Refresh disabled-lab marker colours
+  for (const lab of player.labs) {
+    if (lab.marker) setMarkerEnabled(lab.marker, lab.isActive());
+  }
+
+  // AI tick (single-player only)
+  if (!MP.active && now - state.lastAiTick > C.AI_TICK) {
+    state.lastAiTick = now;
+    aiTick();
+  }
+
+  // Fuzzy drift of enemy science estimate (single-player only — MP uses SYNC)
+  if (!MP.active && Math.random() < dt * 0.08) {
+    const noise = (Math.random() - 0.5) * 12;
+    player.estimatedEnemySci.min = Math.max(0,   ai.science - 20 + noise);
+    player.estimatedEnemySci.max = Math.min(100, ai.science + 20 + noise);
+  }
+
+  // Assembly button: show when science is 100% (click reveals missing requirements)
+  document.getElementById('btn-asm').style.display =
+    (player.science >= 100 && !player.assembling && !player.assemblyDone) ? 'block' : 'none';
+
+  // Check win
+  // Assembly countdown tick (every 10s)
+  if (player.assembling && !player.assemblyDone) {
+    if (now - _lastAssemblyTick >= 10000) { _lastAssemblyTick = now; SFX.assemblyTick(); }
+  } else if (!player.assembling) {
+    _lastAssemblyTick = 0;
+  }
+
+  if (player.assembling && player.assemblyProg() >= 1) {
+    player.assemblyDone = true;
+    endGame(true);
+    return;
+  }
+  if (ai.assembling && ai.assemblyProg() >= 1) {
+    ai.assemblyDone = true;
+    endGame(false);
+    return;
+  }
+
+  updateUI();
+}
+
+function updateUI() {
+  const p = state.player;
+
+  document.getElementById('h-cred').textContent    = `${Math.floor(p.credits)}c`;
+  document.getElementById('h-cps').textContent     = `+${p.creditsPerSec.toFixed(0)}/s`;
+  document.getElementById('h-sci').textContent     = `${p.science.toFixed(1)}%`;
+  document.getElementById('h-sci-bar').style.width = `${p.science}%`;
+
+  document.getElementById('h-du').textContent      = `${p.depletedUranium.toFixed(1)}%`;
+  document.getElementById('h-du-bar').style.width  = `${Math.min(100, p.depletedUranium)}%`;
+
+  const siloLbl = document.getElementById('h-silo-lbl');
+  if (p.silo) {
+    siloLbl.textContent = 'Silo — ready ✓';
+    siloLbl.style.color = '#44ccaa';
+  } else {
+    siloLbl.textContent = 'Silo — not built';
+    siloLbl.style.color = '#4a6a8a';
+  }
+
+  const eMin = Math.floor(p.estimatedEnemySci.min);
+  const eMax = Math.floor(p.estimatedEnemySci.max);
+  document.getElementById('h-enemy').textContent        = `~${eMin}–${eMax}%`;
+  document.getElementById('h-enemy-bar').style.width    = `${(eMin + eMax) / 2}%`;
+
+  if (p.assembling) {
+    document.getElementById('assembly-display').classList.add('show');
+    const ap = Math.floor(p.assemblyProg() * 100);
+    document.getElementById('h-asm').textContent     = `${ap}%`;
+    document.getElementById('h-asm-bar').style.width = `${ap}%`;
+  }
+
+  // Left sidebar
+  const al = p.activeLabs().length;
+  document.getElementById('sl-labs').textContent =
+    `Labs: ${p.labs.length} (${al} active) · Jammers: ${p.jammers.length}` +
+    `\nReactors: ${p.reactors.length} · Silo: ${p.silo ? '✓ placed' : 'none'}`;
+
+  let effectiveSciRate = 0;
+  for (const lab of p.activeLabs()) {
+    const lv   = ll2v3(lab.lat, lab.lon);
+    const mult = state.ai.jammers.some(j => lv.distanceTo(ll2v3(j.lat, j.lon)) <= C.JAMMER_RADIUS) ? 0.5 : 1.0;
+    effectiveSciRate += C.SCI_PER_LAB * mult;
+  }
+  const nominalRate = al * C.SCI_PER_LAB;
+  const duRate = p.reactors.length * C.DU_PER_REACTOR;
+  document.getElementById('sl-rate').textContent =
+    (effectiveSciRate < nominalRate - 0.001
+      ? `${effectiveSciRate.toFixed(3)} sci/s ⚡`
+      : `${effectiveSciRate.toFixed(3)} sci/s`) +
+    `\n${duRate.toFixed(2)} uranium/s`;
+
+  const detailLines = p.labs.map(l => {
+    const lv       = ll2v3(l.lat, l.lon);
+    const isJammed = state.ai.jammers.some(j => lv.distanceTo(ll2v3(j.lat, j.lon)) <= C.JAMMER_RADIUS);
+    const status   = !l.isActive() ? '⏸ sabotaged' : isJammed ? '📡 jammed' : '✓';
+    return `• Lab ${l.region ? l.region.name.split(' ')[0] : '?'} ${status}`;
+  });
+  for (const r of p.reactors) {
+    detailLines.push(`• Reactor ${r.region ? r.region.name.split(' ')[0] : '?'} ✓`);
+  }
+  if (p.silo) {
+    detailLines.push(`• Silo ${p.silo.region ? p.silo.region.name.split(' ')[0] : '?'} ✓`);
+  }
+  document.getElementById('sl-detail').textContent = detailLines.join('\n');
+
+  // Button states
+  document.getElementById('btn-build').disabled    = p.credits < C.LAB_COST;
+  document.getElementById('btn-jammer').disabled   = p.credits < C.JAMMER_COST;
+  document.getElementById('btn-reactor').disabled  = p.credits < C.REACTOR_COST;
+  document.getElementById('btn-silo').disabled     = p.credits < C.SILO_COST || !!p.silo;
+  document.getElementById('btn-recon').disabled    = p.credits < OPS.RECON.cost;
+  document.getElementById('btn-steal').disabled    = p.credits < OPS.STEAL.cost;
+  document.getElementById('btn-sabotage').disabled = p.credits < OPS.SABOTAGE.cost;
+  document.getElementById('btn-sweep').disabled    = p.credits < C.SWEEP_COST;
+
+  // Active ops
+  const activeOps = p.ops.filter(o => !o.done);
+  const opsEl = document.getElementById('sr-ops');
+  if (!activeOps.length) {
+    opsEl.innerHTML = '<div class="sec-info">—</div>';
+  } else {
+    opsEl.innerHTML = activeOps.map(o => `
+      <div class="op-card">
+        ${o.type} → ${o.region ? o.region.name.split(' ')[0] : '?'}
+        <div class="op-bar"><div class="op-fill" style="width:${o.progress() * 100}%"></div></div>
+      </div>`).join('');
+  }
+
+  // Intel
+  const intel          = p.revealedEnemyLabs;
+  const jammerIntel    = p.revealedEnemyJammers;
+  const reactorIntel   = p.revealedEnemyReactors;
+  const siloIntel      = p.revealedEnemySilo;
+  const intelEl        = document.getElementById('sr-intel');
+  const hasIntel = intel.length || jammerIntel.length || reactorIntel.length || siloIntel;
+  if (!hasIntel) {
+    intelEl.textContent = 'No intel. Use RECON or SWEEP to gather data.';
+  } else {
+    let txt = '';
+    if (intel.length) {
+      txt += `${intel.length} lab(s) located:\n` +
+        intel.map(r => `• ${r.lab.region ? r.lab.region.name : '?'} (${r.lab.lat.toFixed(0)}°, ${r.lab.lon.toFixed(0)}°)`).join('\n');
+    }
+    if (jammerIntel.length) {
+      if (txt) txt += '\n';
+      txt += `${jammerIntel.length} jammer(s) found:\n` +
+        jammerIntel.map(j => `• ${j.region ? j.region.name : '?'} (${j.lat.toFixed(0)}°, ${j.lon.toFixed(0)}°) ← SABOTAGE`).join('\n');
+    }
+    if (reactorIntel.length) {
+      if (txt) txt += '\n';
+      txt += `${reactorIntel.length} reactor(s) located:\n` +
+        reactorIntel.map(r => `• ${r.region ? r.region.name : '?'} (${r.lat.toFixed(0)}°, ${r.lon.toFixed(0)}°) ← SABOTAGE`).join('\n');
+    }
+    if (siloIntel) {
+      if (txt) txt += '\n';
+      txt += `Enemy silo located:\n• ${siloIntel.region ? siloIntel.region.name : '?'} (${siloIntel.lat.toFixed(0)}°, ${siloIntel.lon.toFixed(0)}°) ← SABOTAGE`;
+    }
+    intelEl.textContent = txt;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PLAYER ASSEMBLY
+// ═══════════════════════════════════════════════════════════════
+function startAssembly() {
+  const p = state.player;
+  if (p.depletedUranium < 100) { toast('Need 100% depleted uranium! Build more reactors.'); return; }
+  if (!p.silo) { toast('Need a rocket silo before assembly!'); return; }
+  if (p.startAssembly()) {
+    SFX.assemblyStart();
+    log('⚛ Assembly initiated! 4 minutes to completion...', 'imp');
+    document.getElementById('btn-asm').style.display = 'none';
+    document.getElementById('assembly-display').classList.add('show');
+    if (MP.active) MP.send('ASSEMBLY_START', {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  WIN / LOSS
+// ═══════════════════════════════════════════════════════════════
+function endGame(playerWon) {
+  if (state.gameOver) return;
+  state.gameOver = true;
+  if (MP.active && playerWon) MP.send('GAME_OVER', { won: true });
+
+  // Reveal all hidden AI labs (dimmed orange)
+  const alreadyRevealed = new Set(state.player.revealedEnemyLabs.map(r => r.lab.id));
+  let hidden = 0;
+  for (const lab of state.ai.labs) {
+    if (!alreadyRevealed.has(lab.id)) {
+      const pos  = ll2v3(lab.lat, lab.lon, 1.003);
+      const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(0.013, 0.045, 7),
+        new THREE.MeshBasicMaterial({ color: 0xcc7700, transparent: true, opacity: 0.75 })
+      );
+      const up = pos.clone().normalize();
+      cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+      cone.position.copy(pos).addScaledVector(up, 0.022);
+      MARKERS.add(cone); hidden++;
+    }
+  }
+  // Reveal hidden AI silo and reactors
+  if (state.ai.silo && !state.player.revealedEnemySilo) createSiloMarker(state.ai.silo, false);
+  for (const r of state.ai.reactors) {
+    if (!state.player.revealedEnemyReactors.some(x => x.id === r.id)) createReactorMarker(r, false);
+  }
+
+  for (const m of fogMarkers) MARKERS.remove(m);
+  fogMarkers.length = 0;
+
+  const totalLabs  = state.ai.labs.length;
+  const found      = totalLabs - hidden;
+  const revealLine = totalLabs > 0
+    ? `Enemy had ${totalLabs} lab(s) — you found ${found}, missed ${hidden}.`
+    : 'The enemy built no labs.';
+
+  function showOverlay() {
+    const el    = document.getElementById('game-over');
+    const title = document.getElementById('go-title');
+    const desc  = document.getElementById('go-desc');
+    if (playerWon) {
+      el.className      = 'victory';
+      title.textContent = 'VICTORY';
+      desc.textContent  = `ICBM impact confirmed. The world bows. ${revealLine}`;
+    } else {
+      el.className      = 'defeat';
+      title.textContent = 'DEFEAT';
+      desc.textContent  = `Enemy ICBM has landed. The arms race is over. ${revealLine}`;
+    }
+    el.classList.add('show');
+    el.style.display = 'flex';
+    if (playerWon) SFX.victory(); else SFX.defeat();
+  }
+
+  // Launch ICBM from winner's silo toward enemy capital
+  const winningSilo  = playerWon ? state.player.silo : state.ai.silo;
+  const enemyNat     = playerNation === 'USA' ? 'RUSSIA' : 'USA';
+  const targetCap    = playerWon ? NATION_CAPITALS[enemyNat] : NATION_CAPITALS[playerNation];
+  const launchFlag   = playerWon ? (playerNation === 'USA' ? '🇺🇸' : '🇷🇺') : (playerNation === 'USA' ? '🇷🇺' : '🇺🇸');
+
+  if (winningSilo && targetCap) {
+    log(`⚛ ${launchFlag} ICBM LAUNCHED — missile inbound!`, playerWon ? 'ok' : 'danger');
+    toast('ICBM LAUNCHED — missile inbound!');
+    launchICBM(winningSilo.lat, winningSilo.lon, targetCap.lat, targetCap.lon, showOverlay);
+  } else {
+    showOverlay();
+  }
+}
+
+function showResults() {
+  document.getElementById('game-over').style.display = 'none';
+  document.getElementById('results-pill').classList.add('show');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NOTIFICATION + LOG
+// ═══════════════════════════════════════════════════════════════
+const notifEl = document.getElementById('notif');
+let notifTmr;
+function toast(msg) {
+  notifEl.textContent = msg;
+  notifEl.style.opacity = '1';
+  clearTimeout(notifTmr);
+  notifTmr = setTimeout(() => { notifEl.style.opacity = '0'; }, 3200);
+}
+
+const logEl = document.getElementById('event-log');
+function log(msg, cls = '') {
+  const el = document.createElement('div');
+  el.className = `log-line ${cls}`;
+  const t = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  el.textContent = `[${t}] ${msg}`;
+  logEl.prepend(el);
+  while (logEl.children.length > 40) logEl.removeChild(logEl.lastChild);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TARGETING INDICATOR + HOVER LABEL HELPERS
+// ═══════════════════════════════════════════════════════════════
+const tIndEl    = document.getElementById('target-ind');
+const hoverLbl  = document.getElementById('hover-label');
+function showTargetInd(msg) { tIndEl.textContent = msg; tIndEl.classList.add('show'); }
+function hideTargetInd()     { tIndEl.classList.remove('show'); }
+function showHoverLabel(name) { hoverLbl.textContent = name; hoverLbl.style.display = 'block'; }
+function hideHoverLabel()      { hoverLbl.style.display = 'none'; }
+
+// ═══════════════════════════════════════════════════════════════
+//  KEYBOARD
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    exitBuildMode();
+    exitJammerMode();
+    exitReactorMode();
+    exitSiloMode();
+    state.pendingOp = null;
+    clearOpBtns();
+    closeCtx();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════════
+const clock = new THREE.Clock();
+
+(function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Slow auto-spin when not dragging (always on in menu; respects setting in-game)
+  if (!drag && (SETTINGS.autoSpin || !state.player)) G_GROUP.rotation.y += 0.0003;
+
+  // Expand + fade op rings
+  for (const ring of [...RINGS.children]) {
+    const age = (Date.now() - ring.userData.born) / 1000;
+    if (ring.userData.isPulse) {
+      // Search-area pulse: slow expand, lasts 3s
+      if (age > 3.0) { RINGS.remove(ring); ring.geometry.dispose(); }
+      else { ring.scale.setScalar(1 + age * 0.4); ring.material.opacity = 0.7 * (1 - age / 3.0); }
+    } else {
+      if (age > 2.5) { RINGS.remove(ring); ring.geometry.dispose(); }
+      else { ring.scale.setScalar(1 + age * 1.8); ring.material.opacity = 0.85 * (1 - age / 2.5); }
+    }
+  }
+
+  // Pulse fog markers
+  for (const m of fogMarkers) {
+    m.material.opacity = 0.35 + 0.3 * Math.sin(t * 2.5 + m.position.x * 8);
+  }
+
+  update();
+  renderer.render(scene, camera);
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  RESIZE
+// ═══════════════════════════════════════════════════════════════
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  INITIALISE
+// ═══════════════════════════════════════════════════════════════
+function init() {
+  state.player    = new Player('player', true);
+  state.ai        = new Player('ai',     false);
+  state.lastUpdate = Date.now();
+  state.lastAiTick = Date.now();
+
+  // Expose helpers for HTML onclick
+  window.G = { enterBuildMode, enterJammerMode, enterReactorMode, enterSiloMode, selectOp, startAssembly, doSweep };
+
+  // Give AI an initial lab after a short delay
+  setTimeout(() => { if (!state.gameOver) aiBuild(); }, 1500);
+  setTimeout(() => { if (!state.gameOver && state.ai.credits >= C.LAB_COST) aiBuild(); }, 6000);
+
+  log('War Room online. Build labs, reactors, and a rocket silo.', 'imp');
+  log('100% science + 100% uranium + silo → assembly → ICBM launch → victory.', '');
+  log('Use RECON or SWEEP to locate hidden enemy structures.', '');
+
+  updateUI();
+}
+
+// Load globe countries immediately so they're ready when nation is chosen
+buildGlobeCountries();
+</script>
+</body>
+</html>
