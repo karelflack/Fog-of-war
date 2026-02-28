@@ -1851,9 +1851,59 @@ function isOnLand(lat, lon) {
   const [x, y] = llToXY(lon, lat, W, H);
   const px = landCanvas.getContext('2d')
     .getImageData(Math.floor(Math.min(x, W - 1)), Math.floor(Math.min(y, H - 1)), 1, 1).data;
-  // Ocean is painted #0a2240 = rgb(10, 34, 64).
-  // Sum of channel differences > 40 means it's not ocean = it's land.
-  return Math.abs(px[0] - 10) + Math.abs(px[1] - 34) + Math.abs(px[2] - 64) > 40;
+  // Ocean is #6aaac8 = rgb(106,170,200). Land is #0d1e2c = rgb(13,30,44).
+  // If pixel is dark (avg brightness < 80) it's land, otherwise ocean.
+  return (px[0] + px[1] + px[2]) / 3 < 80;
+}
+
+// ── Procedural terrain bump map ────────────────────────────────
+function generateBumpMap(W, H) {
+  // Deterministic hash → value in [0,1]
+  function hash2(ix, iy) {
+    let h = Math.imul(ix * 1619 + iy * 31337, 0x45d9f3b);
+    h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+    return ((h ^ (h >>> 16)) >>> 0) / 0x100000000;
+  }
+  // Smooth value noise (bilinear, smoothstep)
+  function valueNoise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const ux = xf * xf * (3 - 2 * xf);
+    const uy = yf * yf * (3 - 2 * yf);
+    const v00 = hash2(xi,   yi);
+    const v10 = hash2(xi+1, yi);
+    const v01 = hash2(xi,   yi+1);
+    const v11 = hash2(xi+1, yi+1);
+    return v00*(1-ux)*(1-uy) + v10*ux*(1-uy) + v01*(1-ux)*uy + v11*ux*uy;
+  }
+
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(W, H);
+
+  // Five octaves: large continental shelves down to ridge detail
+  const octaves = [
+    { s: W / 4.5, a: 0.40 },
+    { s: W / 11,  a: 0.26 },
+    { s: W / 26,  a: 0.18 },
+    { s: W / 60,  a: 0.10 },
+    { s: W / 130, a: 0.06 },
+  ];
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let v = 0;
+      for (const { s, a } of octaves) v += valueNoise(x / s, y / s) * a;
+      // v ≈ 0–1  (sum of amps = 1.0)
+      const b = Math.round(Math.max(0, Math.min(255, v * 255)));
+      const i = (y * W + x) * 4;
+      img.data[i] = img.data[i+1] = img.data[i+2] = b;
+      img.data[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
 }
 
 async function buildGlobeCountries() {
@@ -1902,6 +1952,15 @@ async function buildGlobeCountries() {
     baseTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     oceanMesh.material.map   = baseTex;
     oceanMesh.material.color.set(0xffffff);
+
+    // ── Procedural bump map for terrain depth ──────────────────
+    const bumpCanvas = generateBumpMap(1024, 512);
+    const bumpTex = new THREE.CanvasTexture(bumpCanvas);
+    bumpTex.minFilter = THREE.LinearFilter;
+    bumpTex.magFilter = THREE.LinearFilter;
+    bumpTex.generateMipmaps = false;
+    oceanMesh.material.bumpMap   = bumpTex;
+    oceanMesh.material.bumpScale = 0.08;
     oceanMesh.material.needsUpdate = true;
 
     // ── 2. Hover overlay — semi-transparent sphere redrawn on hover ──
