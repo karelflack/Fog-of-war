@@ -400,37 +400,6 @@ function placeGroup(group, lat, lon) {
   group.position.copy(pos);
 }
 
-// Surface-aligned glow pad — flat circle on the globe, can't bleed through
-function createGlowSprite(hexColor, size = 0.09) {
-  const radius = size * 0.5;
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const ctx2 = c.getContext('2d');
-  const col = new THREE.Color(hexColor);
-  const r = Math.round(col.r * 255), g = Math.round(col.g * 255), b = Math.round(col.b * 255);
-  const grad = ctx2.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0,    `rgba(${r},${g},${b},1)`);
-  grad.addColorStop(0.35, `rgba(${r},${g},${b},0.45)`);
-  grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
-  ctx2.fillStyle = grad;
-  ctx2.fillRect(0, 0, 64, 64);
-  const mesh = new THREE.Mesh(
-    new THREE.CircleGeometry(radius, 24),
-    new THREE.MeshBasicMaterial({
-      map: new THREE.CanvasTexture(c),
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-      side: THREE.FrontSide,
-    })
-  );
-  // Rotate flat onto the local XZ plane (y = up in the building's local space)
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(0, 0.001, 0);
-  mesh.userData.isGlow = true;
-  mesh.userData.phase  = Math.random() * Math.PI * 2;
-  return mesh;
-}
 
 // Set all child mesh colours — used for active/sabotaged state
 function setMarkerEnabled(marker, enabled) {
@@ -454,7 +423,6 @@ function createLabMarker(lab, isPlayer) {
   const CM  = isPlayer ? 0x2a7a30 : 0x7a2a2a;   // main body
   const CR  = isPlayer ? 0x33993a : 0x993333;   // roof
   const CA  = isPlayer ? 0x66ff44 : 0xff8833;   // antenna (emissive)
-  const GC  = isPlayer ? 0x44ff44 : 0xff4422;   // glow colour
 
   const g = new THREE.Group();
 
@@ -486,10 +454,7 @@ function createLabMarker(lab, isPlayer) {
   tip.position.set(0.005, 0.054, 0);
   tip.userData.isBeacon = true;
 
-  const glow = createGlowSprite(GC, 0.09);
-  glow.position.set(0, 0.002, 0);
-
-  g.add(fnd, body, roof, wing, mast, arm1, arm2, tip, glow);
+  g.add(fnd, body, roof, wing, mast, arm1, arm2, tip);
   placeGroup(g, lab.lat, lab.lon);
   g.userData.labId    = lab.id;
   g.userData.isPlayer = isPlayer;
@@ -504,7 +469,6 @@ function createReactorMarker(reactor, isPlayer) {
   const CM  = isPlayer ? 0x186650 : 0x7a380e;   // vessel
   const CD  = isPlayer ? 0x22cc88 : 0xee7722;   // dome (emissive)
   const CC  = isPlayer ? 0x1a5540 : 0x6a3010;   // cooling tower
-  const GC  = isPlayer ? 0x00ffcc : 0xff8800;   // glow colour
 
   const g = new THREE.Group();
 
@@ -530,10 +494,7 @@ function createReactorMarker(reactor, isPlayer) {
   const cool2 = mkPart(new THREE.CylinderGeometry(0.004, 0.010, 0.028, 9), CC);
   cool2.position.set(-0.018, 0.018, -0.006);
 
-  const glow = createGlowSprite(GC, 0.10);
-  glow.position.set(0, 0.002, 0);
-
-  g.add(fnd, vessel, band, dome, cool1, cool2, glow);
+  g.add(fnd, vessel, band, dome, cool1, cool2);
   placeGroup(g, reactor.lat, reactor.lon);
   g.userData.reactorId = reactor.id;
   MARKERS.add(g);
@@ -546,7 +507,6 @@ function createJammerMarker(jammer, isPlayer) {
   const CB  = isPlayer ? 0x7a5500 : 0x771000;   // base
   const CM  = isPlayer ? 0xcc9900 : 0xcc2000;   // mast
   const CA  = isPlayer ? 0xffee33 : 0xff4422;   // arms (emissive)
-  const GC  = isPlayer ? 0xffdd00 : 0xff3300;   // glow
 
   const g = new THREE.Group();
 
@@ -571,10 +531,7 @@ function createJammerMarker(jammer, isPlayer) {
   tip.position.set(0, 0.058, 0);
   tip.userData.isBeacon = true;
 
-  const glow = createGlowSprite(GC, 0.09);
-  glow.position.set(0, 0.002, 0);
-
-  g.add(pad, mast, arm1, arm2, arm3, tip, glow);
+  g.add(pad, mast, arm1, arm2, arm3, tip);
   placeGroup(g, jammer.lat, jammer.lon);
   g.userData.jammerId = jammer.id;
   MARKERS.add(g);
@@ -588,7 +545,6 @@ function createSiloMarker(silo, isPlayer) {
   const CS  = isPlayer ? 0x060810 : 0x100606;   // inner shaft
   const CM  = isPlayer ? 0x8899bb : 0xbb8888;   // missile body
   const CN  = isPlayer ? 0xaaddff : 0xffaaaa;   // nose (emissive)
-  const GC  = isPlayer ? 0x4488ff : 0xff3333;   // glow colour
 
   const g = new THREE.Group();
 
@@ -615,10 +571,7 @@ function createSiloMarker(silo, isPlayer) {
   nose.position.set(0, 0.058, 0);
   nose.userData.isBeacon = true;
 
-  const glow = createGlowSprite(GC, 0.09);
-  glow.position.set(0, 0.002, 0);
-
-  g.add(rim, shaft, mbody, fin1, fin2, nose, glow);
+  g.add(rim, shaft, mbody, fin1, fin2, nose);
   placeGroup(g, silo.lat, silo.lon);
   g.userData.siloId = silo.id;
   MARKERS.add(g);
@@ -809,14 +762,10 @@ const clock = new THREE.Clock();
     m.material.opacity = 0.35 + 0.3 * Math.sin(t * 2.5 + m.position.x * 8);
   }
 
-  // Pulse building glow sprites + beacon tips
+  // Pulse beacon tips on buildings
   MARKERS.traverse(child => {
-    if (child.isMesh && child.userData.isGlow) {
-      const base = child.userData.disabled ? 0.08 : 0.55;
-      child.material.opacity = base + (child.userData.disabled ? 0 : 0.35) * Math.sin(t * 2.2 + child.userData.phase);
-    }
     if (child.isMesh && child.userData.isBeacon && child.material.emissiveIntensity > 0) {
-      child.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 3.5 + child.userData.phase || 0);
+      child.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 3.5 + (child.userData.phase || 0));
     }
   });
 
