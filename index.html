@@ -1797,7 +1797,7 @@ scene.add(G_GROUP);
 // Ocean sphere — higher segments for smoother silhouette
 const oceanMesh = new THREE.Mesh(
   new THREE.SphereGeometry(1.0, 96, 96),
-  new THREE.MeshPhongMaterial({ color: 0x1e3d58, shininess: 6, specular: 0x0a1a28 })
+  new THREE.MeshPhongMaterial({ color: 0x6aaac8, shininess: 6, specular: 0x1a3a50 })
 );
 G_GROUP.add(oceanMesh);
 
@@ -1877,7 +1877,7 @@ async function buildGlobeCountries() {
     const ctx = baseCanvas.getContext('2d');
 
     // ── Ocean base ───────────────────────────────────────────
-    ctx.fillStyle = '#1e3d58';
+    ctx.fillStyle = '#6aaac8';
     ctx.fillRect(0, 0, W, H);
 
     // ── Land — single unified dark navy, no borders ──────────
