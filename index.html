@@ -1785,8 +1785,8 @@ document.getElementById('canvas-container').appendChild(renderer.domElement);
 })();
 
 // Lighting
-scene.add(new THREE.AmbientLight(0x223344, 0.9));
-const sun = new THREE.DirectionalLight(0xfff0e8, 1.1);
+scene.add(new THREE.AmbientLight(0x4a6a88, 0.75));
+const sun = new THREE.DirectionalLight(0xddeeff, 1.3);
 sun.position.set(4, 2, 3);
 scene.add(sun);
 
@@ -1797,7 +1797,7 @@ scene.add(G_GROUP);
 // Ocean sphere — higher segments for smoother silhouette
 const oceanMesh = new THREE.Mesh(
   new THREE.SphereGeometry(1.0, 96, 96),
-  new THREE.MeshPhongMaterial({ color: 0x0a2240, shininess: 20, specular: 0x0d2a50 })
+  new THREE.MeshPhongMaterial({ color: 0x1e3d58, shininess: 6, specular: 0x0a1a28 })
 );
 G_GROUP.add(oceanMesh);
 
@@ -1805,7 +1805,7 @@ G_GROUP.add(oceanMesh);
 G_GROUP.add(new THREE.Mesh(
   new THREE.SphereGeometry(1.06, 32, 32),
   new THREE.MeshBasicMaterial({
-    color: 0x1a5090, transparent: true, opacity: 0.10,
+    color: 0x2a6090, transparent: true, opacity: 0.07,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
   })
 ));
@@ -1876,18 +1876,19 @@ async function buildGlobeCountries() {
     const baseCanvas = landCanvas;
     const ctx = baseCanvas.getContext('2d');
 
-    ctx.fillStyle = '#0a2240';          // ocean
+    // ── Ocean base ───────────────────────────────────────────
+    ctx.fillStyle = '#1e3d58';
     ctx.fillRect(0, 0, W, H);
 
-    for (const feat of countryFeats) { // filled country polygons
-      const cen = polyCentroid(feat.geometry);
-      const reg = getRegion(cen.lat, cen.lon);
-      ctx.fillStyle = '#' + countryColor(reg, feat.id).getHexString();
+    // ── Land — single unified dark navy, no borders ──────────
+    ctx.fillStyle = '#0d1e2c';
+    for (const feat of countryFeats) {
       geoFill(ctx, feat.geometry, W, H);
     }
 
-    ctx.strokeStyle = 'rgba(0,0,0,0.28)'; // subtle country borders baked into texture
-    ctx.lineWidth   = 0.7;
+    // Very subtle coastline edge — same dark tone, barely visible
+    ctx.strokeStyle = 'rgba(10,25,40,0.55)';
+    ctx.lineWidth   = 0.5;
     for (const feat of countryFeats) {
       ctx.beginPath();
       geoTrace(ctx, feat.geometry, W, H);
@@ -1895,12 +1896,12 @@ async function buildGlobeCountries() {
     }
 
     const baseTex = new THREE.CanvasTexture(baseCanvas);
-    baseTex.minFilter  = THREE.LinearFilter;  // no mipmaps = no blur
+    baseTex.minFilter  = THREE.LinearFilter;
     baseTex.magFilter  = THREE.LinearFilter;
     baseTex.generateMipmaps = false;
     baseTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     oceanMesh.material.map   = baseTex;
-    oceanMesh.material.color.set(0xffffff); // let texture supply colour
+    oceanMesh.material.color.set(0xffffff);
     oceanMesh.material.needsUpdate = true;
 
     // ── 2. Hover overlay — semi-transparent sphere redrawn on hover ──
