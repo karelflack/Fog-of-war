@@ -223,79 +223,9 @@ async function buildGlobeCountries() {
     // ── 3. 3D border line-segments per region (shown on hover) ──
     buildRegionBorderLines(countryFeats);
 
-    // ── 4. City lights overlay ────────────────────────────────
-    buildCityLights();
-
   } catch (e) {
     console.warn('Globe: failed to load country data', e);
   }
-}
-
-// ── City lights overlay ───────────────────────────────────────
-function buildCityLights() {
-  // [lat, lon, radius_px, opacity]  — Cold War era major cities
-  const CITIES = [
-    // North America
-    [40.71,-74.01,9,1.0],[34.05,-118.24,8,0.9],[41.88,-87.63,7,0.85],
-    [29.76,-95.37,6,0.8],[38.91,-77.04,6,0.8],[37.77,-122.42,6,0.8],
-    [42.36,-71.06,5,0.7],[32.78,-96.80,6,0.75],[47.61,-122.33,5,0.7],
-    [25.77,-80.19,5,0.7],[43.65,-79.38,5,0.7],[45.50,-73.57,5,0.65],
-    [19.43,-99.13,7,0.85],
-    // Europe
-    [51.51,-0.13,9,1.0],[48.85,2.35,9,1.0],[52.52,13.41,8,0.95],
-    [55.75,37.62,9,1.0],[40.42,-3.70,6,0.8],[41.90,12.50,7,0.85],
-    [52.23,21.01,6,0.75],[48.21,16.37,6,0.75],[50.08,14.44,5,0.7],
-    [47.50,19.04,5,0.7],[44.43,26.10,5,0.65],[52.37,4.90,6,0.75],
-    [50.85,4.35,6,0.75],[59.33,18.07,5,0.7],[41.01,28.98,7,0.85],
-    [50.45,30.52,6,0.75],[59.95,30.32,7,0.85],[54.99,82.90,4,0.55],
-    [55.00,82.93,4,0.55],
-    // Asia
-    [35.69,139.69,10,1.0],[39.91,116.39,9,0.95],[31.23,121.47,8,0.9],
-    [22.28,114.16,7,0.85],[37.57,126.98,7,0.85],[13.75,100.52,7,0.8],
-    [1.29,103.85,6,0.8],[-6.21,106.85,7,0.8],[14.60,120.98,6,0.75],
-    [24.86,67.01,6,0.75],[19.08,72.88,8,0.9],[28.61,77.21,8,0.9],
-    [22.57,88.36,7,0.8],[35.69,51.39,6,0.75],[33.34,44.40,5,0.65],
-    [41.30,69.25,5,0.65],[43.25,76.95,4,0.6],[25.05,121.53,6,0.75],
-    [23.72,90.41,6,0.75],[24.69,46.72,5,0.65],
-    // Middle East & Africa
-    [30.05,31.25,7,0.85],[6.45,3.39,6,0.75],[-4.32,15.32,4,0.55],
-    [-26.20,28.04,6,0.75],[-1.29,36.82,5,0.65],[33.59,-7.62,5,0.65],
-    [9.03,38.74,4,0.55],
-    // South America
-    [-23.55,-46.63,8,0.9],[-34.60,-58.38,7,0.85],[-22.91,-43.17,7,0.8],
-    [-12.05,-77.04,5,0.7],[4.71,-74.07,5,0.7],[-33.45,-70.67,5,0.7],
-    [10.48,-66.88,5,0.65],
-    // Oceania
-    [-33.87,151.21,6,0.8],[-37.81,144.96,5,0.75],
-  ];
-
-  const W = 2048, H = 1024;
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const ctx = c.getContext('2d');
-
-  for (const [lat, lon, rad, opacity] of CITIES) {
-    const [x, y] = llToXY(lon, lat, W, H);
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, rad * 3.5);
-    grad.addColorStop(0,   `rgba(255,230,160,${opacity})`);
-    grad.addColorStop(0.2, `rgba(255,200,100,${opacity * 0.6})`);
-    grad.addColorStop(0.5, `rgba(255,160,60,${opacity * 0.2})`);
-    grad.addColorStop(1,   'rgba(0,0,0,0)');
-    ctx.fillStyle = grad;
-    const r = rad * 3.5;
-    ctx.fillRect(x - r, y - r, r * 2, r * 2);
-  }
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.minFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  G_GROUP.add(new THREE.Mesh(
-    new THREE.SphereGeometry(1.001, 64, 64),
-    new THREE.MeshBasicMaterial({
-      map: tex, blending: THREE.AdditiveBlending,
-      transparent: true, depthWrite: false,
-    })
-  ));
 }
 
 // ── Canvas drawing helpers ───────────────────────────────────
