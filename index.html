@@ -594,6 +594,43 @@
       font-style: italic; min-height: 16px;
     }
 
+    /* ── ICBM Alarm overlay ──────────────────────── */
+    #icbm-alarm {
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 250;
+      display: none;
+      align-items: center; justify-content: center;
+    }
+    #icbm-alarm.show { display: flex; }
+
+    #icbm-alarm::before {
+      content: '';
+      position: fixed; inset: 0;
+      border: 3px solid #ff2200;
+      box-shadow: inset 0 0 60px rgba(255,34,0,0.12);
+      animation: alarm-border 0.45s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    #icbm-alarm-text {
+      font-size: 22px; letter-spacing: 7px; font-weight: bold;
+      color: #ff2200; text-transform: uppercase;
+      text-shadow: 0 0 28px rgba(255,34,0,0.9), 0 0 60px rgba(255,0,0,0.4);
+      animation: alarm-text 0.45s ease-in-out infinite;
+      background: rgba(0,0,0,0.55);
+      padding: 14px 36px; border: 1px solid rgba(255,34,0,0.4);
+      border-radius: 2px;
+    }
+
+    @keyframes alarm-border {
+      0%, 100% { opacity: 0.85; }
+      50%       { opacity: 0.10; }
+    }
+    @keyframes alarm-text {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.25; }
+    }
+
     /* ── Multiplayer screen ────────────────────────── */
     #mp-join-input {
       background: #050d18; border: 1px solid #1a3a5a;
@@ -946,6 +983,11 @@
     <button class="btn show-results-btn" onclick="showResults()">◎ SHOW RESULTS</button>
     <button class="btn restart-btn" onclick="location.reload()">▶ PLAY AGAIN</button>
   </div>
+</div>
+
+<!-- ICBM Alarm -->
+<div id="icbm-alarm">
+  <div id="icbm-alarm-text">⚠ INCOMING MISSILE ⚠</div>
 </div>
 
 <!-- Floating pill visible when inspecting the globe after game over -->
@@ -2446,24 +2488,128 @@ function doBuildLab(lat, lon, region) {
 // ═══════════════════════════════════════════════════════════════
 //  ICBM LAUNCH ANIMATION
 // ═══════════════════════════════════════════════════════════════
-function launchICBM(fromLat, fromLon, toLat, toLon, onArrival) {
+// ── Klaxon alarm ───────────────────────────────────────────────
+let _klaxonInterval = null;
+function startKlaxon() {
+  function blast() {
+    ramp(740, 460, 0.28, 'sawtooth', 0.32, 0.00);
+    ramp(740, 460, 0.28, 'sawtooth', 0.28, 0.34);
+  }
+  blast();
+  _klaxonInterval = setInterval(blast, 700);
+}
+function stopKlaxon() {
+  if (_klaxonInterval) { clearInterval(_klaxonInterval); _klaxonInterval = null; }
+}
+
+// ── Camera shake (CSS transform on canvas) ─────────────────────
+function shakeCamera(duration = 1400, intensity = 12) {
+  const canvas = renderer.domElement;
+  const startT = performance.now();
+  function shake() {
+    const elapsed = performance.now() - startT;
+    if (elapsed >= duration) { canvas.style.transform = ''; return; }
+    const factor = 1 - elapsed / duration;
+    const amp = intensity * factor * factor;
+    const dx = (Math.random() - 0.5) * amp * 2;
+    const dy = (Math.random() - 0.5) * amp * 2;
+    canvas.style.transform = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)`;
+    requestAnimationFrame(shake);
+  }
+  requestAnimationFrame(shake);
+}
+
+// ── Expanding shockwave rings at impact site ───────────────────
+function spawnShockwave(pos) {
+  const normal = pos.clone().normalize();
+  const tmp    = Math.abs(normal.y) < 0.9 ? new THREE.Vector3(0,1,0) : new THREE.Vector3(1,0,0);
+  const right  = new THREE.Vector3().crossVectors(tmp, normal).normalize();
+  const fwd    = new THREE.Vector3().crossVectors(normal, right).normalize();
+
+  // Build unit circle in local tangent plane
+  const N = 80;
+  const unitPts = [];
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    unitPts.push(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)));
+  }
+
+  [[0, 0xffffff, 0.90, 900], [120, 0xff9900, 0.70, 1200], [280, 0xff2200, 0.50, 1500]].forEach(
+    ([delay, color, maxOpacity, dur]) => {
+      setTimeout(() => {
+        // Build ring points in world tangent plane
+        const worldPts = unitPts.map(p =>
+          pos.clone()
+            .addScaledVector(right, p.x * 0.001)
+            .addScaledVector(fwd,   p.z * 0.001)
+        );
+        const geo = new THREE.BufferGeometry().setFromPoints(worldPts);
+        const mat = new THREE.LineBasicMaterial({
+          color, transparent: true, opacity: maxOpacity,
+          blending: THREE.AdditiveBlending,
+        });
+        const ring = new THREE.Line(geo, mat);
+        ring.position.set(0, 0, 0);  // points are already in world space
+        G_GROUP.add(ring);
+
+        const t0 = performance.now();
+        function animRing() {
+          const t = Math.min(1, (performance.now() - t0) / dur);
+          const scale = 1 + t * 280;
+          // Expand by scaling ring object (local origin = impact pos effectively)
+          ring.scale.setScalar(scale);
+          mat.opacity = maxOpacity * (1 - t * t);
+          if (t < 1) requestAnimationFrame(animRing);
+          else { G_GROUP.remove(ring); geo.dispose(); mat.dispose(); }
+        }
+        requestAnimationFrame(animRing);
+      }, delay);
+    }
+  );
+}
+
+// ── ICBM launch animation ──────────────────────────────────────
+function launchICBM(fromLat, fromLon, toLat, toLon, onArrival, incoming = true) {
   SFX.icbmLaunch();
-  // Positions in globe-local space so they rotate with the planet
+
+  // Alarm overlay
+  const alarmEl    = document.getElementById('icbm-alarm');
+  const alarmText  = document.getElementById('icbm-alarm-text');
+  alarmText.textContent = incoming ? '⚠  INCOMING MISSILE  ⚠' : '⚛  MISSILE LAUNCHED  ⚛';
+  alarmText.style.color = incoming ? '#ff2200' : '#ffcc00';
+  alarmText.style.textShadow = incoming
+    ? '0 0 28px rgba(255,34,0,0.9)'
+    : '0 0 28px rgba(255,200,0,0.9)';
+  alarmEl.classList.add('show');
+  if (SETTINGS.sound) startKlaxon();
+
+  // Positions in globe-local space
   const start = ll2v3(fromLat, fromLon, 1.0);
   const end   = ll2v3(toLat,   toLon,   1.0);
-  const ctrl  = start.clone().add(end).multiplyScalar(0.5).normalize().multiplyScalar(1.55);
+  const ctrl  = start.clone().add(end).multiplyScalar(0.5).normalize().multiplyScalar(1.58);
   const curve = new THREE.QuadraticBezierCurve3(start, ctrl, end);
 
-  const missileMat = new THREE.MeshBasicMaterial({ color: 0xff6600 });
-  const missile    = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), missileMat);
+  // Missile body
+  const missileMat = new THREE.MeshBasicMaterial({ color: 0xffeecc });
+  const missile    = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 8), missileMat);
   G_GROUP.add(missile);
 
-  const MAX_TRAIL  = 80;
-  const trailPts   = [];
-  const trailGeo   = new THREE.BufferGeometry();
-  const trailMat2  = new THREE.LineBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.75 });
-  const trailLine  = new THREE.Line(trailGeo, trailMat2);
+  // Core trail (bright white → red on re-entry)
+  const MAX_TRAIL = 90;
+  const trailPts  = [];
+  const trailGeo  = new THREE.BufferGeometry();
+  const trailMat  = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 });
+  const trailLine = new THREE.Line(trailGeo, trailMat);
   G_GROUP.add(trailLine);
+
+  // Glow trail (wider, additive, orange → deep red on re-entry)
+  const glowGeo  = new THREE.BufferGeometry();
+  const glowMat  = new THREE.LineBasicMaterial({
+    color: 0xff8800, transparent: true, opacity: 0.30,
+    blending: THREE.AdditiveBlending,
+  });
+  const glowLine = new THREE.Line(glowGeo, glowMat);
+  G_GROUP.add(glowLine);
 
   const DURATION  = 7000;
   const startTime = performance.now();
@@ -2473,34 +2619,80 @@ function launchICBM(fromLat, fromLon, toLat, toLon, onArrival) {
     const pos = curve.getPoint(t);
     missile.position.copy(pos);
 
+    // Re-entry phase: last 30% of flight
+    const reentry = Math.max(0, (t - 0.70) / 0.30);
+    if (reentry > 0) {
+      // Core turns white → orange → red
+      trailMat.color.setHex(reentry < 0.5
+        ? 0xffcc44 + Math.round((1 - reentry * 2) * 0xbb) * 0x100
+        : 0xff2200);
+      glowMat.color.setHex(0xff2200);
+      glowMat.opacity = 0.30 + reentry * 0.55;
+      missileMat.color.setHex(reentry > 0.6 ? 0xff4400 : 0xff9900);
+    }
+
+    // Update trail
     trailPts.push(pos.clone());
     if (trailPts.length > MAX_TRAIL) trailPts.shift();
     const flat = [];
     for (const p of trailPts) flat.push(p.x, p.y, p.z);
-    trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(flat, 3));
+    const attr = new THREE.Float32BufferAttribute(flat, 3);
+    trailGeo.setAttribute('position', attr);
     trailGeo.setDrawRange(0, trailPts.length);
+    glowGeo.setAttribute('position', attr.clone());
+    glowGeo.setDrawRange(0, trailPts.length);
 
     if (t < 1) {
       requestAnimationFrame(tick);
     } else {
-      G_GROUP.remove(missile); G_GROUP.remove(trailLine);
+      // Cleanup missile + trails
+      G_GROUP.remove(missile); G_GROUP.remove(trailLine); G_GROUP.remove(glowLine);
       missile.geometry.dispose(); missileMat.dispose();
-      trailGeo.dispose(); trailMat2.dispose();
+      trailGeo.dispose(); trailMat.dispose();
+      glowGeo.dispose();  glowMat.dispose();
 
-      // Explosion flash at target
-      const flashMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.07, 10, 10),
-        new THREE.MeshBasicMaterial({ color: 0xff8800, transparent: true, opacity: 0.95 })
+      // Stop alarm
+      stopKlaxon();
+      alarmEl.classList.remove('show');
+
+      // Initial fireball flash
+      const fireball = new THREE.Mesh(
+        new THREE.SphereGeometry(0.10, 12, 12),
+        new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.95,
+          blending: THREE.AdditiveBlending })
       );
-      flashMesh.position.copy(end);
-      G_GROUP.add(flashMesh);
+      fireball.position.copy(end);
+      G_GROUP.add(fireball);
+
+      // Secondary white core flash
+      const coreFlash = new THREE.Mesh(
+        new THREE.SphereGeometry(0.045, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0,
+          blending: THREE.AdditiveBlending })
+      );
+      coreFlash.position.copy(end);
+      G_GROUP.add(coreFlash);
+
+      // Animate fireball + core
       let age = 0;
       const fade = setInterval(() => {
-        age += 0.08;
-        flashMesh.material.opacity = 0.95 * (1 - age);
-        flashMesh.scale.setScalar(1 + age * 3);
-        if (age >= 1) { clearInterval(fade); G_GROUP.remove(flashMesh); flashMesh.geometry.dispose(); }
+        age += 0.06;
+        fireball.material.opacity  = Math.max(0, 0.95 * (1 - age));
+        fireball.scale.setScalar(1 + age * 4);
+        coreFlash.material.opacity = Math.max(0, 1.0  * (1 - age * 2));
+        coreFlash.scale.setScalar(1 + age * 2);
+        if (age >= 1) {
+          clearInterval(fade);
+          G_GROUP.remove(fireball);  fireball.geometry.dispose();
+          G_GROUP.remove(coreFlash); coreFlash.geometry.dispose();
+        }
       }, 30);
+
+      // Shockwave rings
+      spawnShockwave(end);
+
+      // Camera shake
+      shakeCamera(1600, 14);
 
       SFX.icbmImpact();
       if (onArrival) onArrival();
@@ -3430,7 +3622,7 @@ function endGame(playerWon) {
   if (winningSilo && targetCap) {
     log(`⚛ ${launchFlag} ICBM LAUNCHED — missile inbound!`, playerWon ? 'ok' : 'danger');
     toast('ICBM LAUNCHED — missile inbound!');
-    launchICBM(winningSilo.lat, winningSilo.lon, targetCap.lat, targetCap.lon, showOverlay);
+    launchICBM(winningSilo.lat, winningSilo.lon, targetCap.lat, targetCap.lon, showOverlay, !playerWon);
   } else {
     showOverlay();
   }
