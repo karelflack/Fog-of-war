@@ -1856,55 +1856,6 @@ function isOnLand(lat, lon) {
   return (px[0] + px[1] + px[2]) / 3 < 80;
 }
 
-// ── Procedural terrain bump map ────────────────────────────────
-function generateBumpMap(W, H) {
-  // sin-based hash — simple, reliable, good distribution
-  function sn(x, y) {
-    const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-    return v - Math.floor(v);
-  }
-  function valueNoise(x, y) {
-    const xi = Math.floor(x), yi = Math.floor(y);
-    const xf = x - xi, yf = y - yi;
-    const ux = xf * xf * (3 - 2 * xf);
-    const uy = yf * yf * (3 - 2 * yf);
-    return (
-      sn(xi,   yi)   * (1-ux) * (1-uy) +
-      sn(xi+1, yi)   * ux     * (1-uy) +
-      sn(xi,   yi+1) * (1-ux) * uy     +
-      sn(xi+1, yi+1) * ux     * uy
-    );
-  }
-
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(W, H);
-
-  // Higher-frequency octaves so per-pixel gradient is large enough for Three.js to see
-  const octaves = [
-    { s: 70,  a: 0.42 },
-    { s: 35,  a: 0.28 },
-    { s: 17,  a: 0.16 },
-    { s: 8,   a: 0.09 },
-    { s: 4,   a: 0.05 },
-  ];
-
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      let v = 0;
-      for (const { s, a } of octaves) v += valueNoise(x / s, y / s) * a;
-      // Boost contrast with a curve
-      v = Math.pow(Math.max(0, Math.min(1, v)), 0.75);
-      const b = Math.round(v * 255);
-      const i = (y * W + x) * 4;
-      img.data[i] = img.data[i+1] = img.data[i+2] = b;
-      img.data[i+3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  return c;
-}
 
 async function buildGlobeCountries() {
   try {
@@ -1953,14 +1904,39 @@ async function buildGlobeCountries() {
     oceanMesh.material.map   = baseTex;
     oceanMesh.material.color.set(0xffffff);
 
-    // ── Procedural bump map for terrain depth ──────────────────
-    const bumpCanvas = generateBumpMap(1024, 512);
-    const bumpTex = new THREE.CanvasTexture(bumpCanvas);
-    bumpTex.minFilter = THREE.LinearFilter;
-    bumpTex.magFilter = THREE.LinearFilter;
-    bumpTex.generateMipmaps = false;
-    oceanMesh.material.bumpMap   = bumpTex;
-    oceanMesh.material.bumpScale = 0.35;
+    // ── Hillshade: paint terrain variation directly into land pixels ──
+    // (bumpMap is invisible on dark land; direct pixel painting always works)
+    {
+      const imgData = ctx.getImageData(0, 0, W, H);
+      const d = imgData.data;
+      function _sn(x, y) {
+        const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+        return v - Math.floor(v);
+      }
+      function _vn(x, y) {
+        const xi = Math.floor(x), yi = Math.floor(y);
+        const xf = x - xi, yf = y - yi;
+        const ux = xf*xf*(3-2*xf), uy = yf*yf*(3-2*yf);
+        return _sn(xi,yi)*(1-ux)*(1-uy) + _sn(xi+1,yi)*ux*(1-uy) +
+               _sn(xi,yi+1)*(1-ux)*uy   + _sn(xi+1,yi+1)*ux*uy;
+      }
+      for (let py = 0; py < H; py++) {
+        for (let px = 0; px < W; px++) {
+          const i = (py * W + px) * 4;
+          if ((d[i] + d[i+1] + d[i+2]) / 3 >= 80) continue; // skip ocean
+          // Multi-octave noise: continental (180px) down to fine detail (8px)
+          let v = _vn(px/180, py/180)*0.42 + _vn(px/80, py/80)*0.28 +
+                  _vn(px/38,  py/38) *0.18 + _vn(px/17, py/17)*0.09 +
+                  _vn(px/8,   py/8)  *0.05;
+          v = Math.pow(Math.min(1, Math.max(0, v)), 0.85);
+          // Lerp: valley #0a1520 (10,21,32) → peak #224468 (34,68,104)
+          d[i]   = Math.round(10 + v * 24);
+          d[i+1] = Math.round(21 + v * 47);
+          d[i+2] = Math.round(32 + v * 72);
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
     oceanMesh.material.needsUpdate = true;
 
     // ── 2. Hover overlay — semi-transparent sphere redrawn on hover ──
