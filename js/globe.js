@@ -378,11 +378,18 @@ G_GROUP.add(MARKERS);
 G_GROUP.add(RINGS);
 
 // ── 3D building helpers ───────────────────────────────────────
-function mkPart(geo, color) {
-  const m = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({
-    color, specular: 0x112233, shininess: 40,
-  }));
-  m.userData.origColor = color;
+function mkPart(geo, color, emissive = null) {
+  const mat = new THREE.MeshPhongMaterial({
+    color, specular: 0x223344, shininess: 55,
+  });
+  if (emissive !== null) {
+    mat.emissive = new THREE.Color(emissive);
+    mat.emissiveIntensity = 0.7;
+    mat.userData = { emissive };
+  }
+  const m = new THREE.Mesh(geo, mat);
+  m.userData.origColor    = color;
+  m.userData.emissiveColor = emissive;
   return m;
 }
 
@@ -393,43 +400,90 @@ function placeGroup(group, lat, lon) {
   group.position.copy(pos);
 }
 
+// Billboard glow sprite — always faces camera, additive blend
+function createGlowSprite(hexColor, size = 0.09) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx2 = c.getContext('2d');
+  const col = new THREE.Color(hexColor);
+  const r = Math.round(col.r * 255), g = Math.round(col.g * 255), b = Math.round(col.b * 255);
+  const grad = ctx2.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0,    `rgba(${r},${g},${b},1)`);
+  grad.addColorStop(0.35, `rgba(${r},${g},${b},0.45)`);
+  grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+  ctx2.fillStyle = grad;
+  ctx2.fillRect(0, 0, 64, 64);
+  const mat = new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(c),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.setScalar(size);
+  sprite.userData.isGlow = true;
+  sprite.userData.phase  = Math.random() * Math.PI * 2;
+  return sprite;
+}
+
 // Set all child mesh colours — used for active/sabotaged state
 function setMarkerEnabled(marker, enabled) {
   if (!marker) return;
   marker.traverse(child => {
-    if (child.isMesh)
-      child.material.color.setHex(enabled ? (child.userData.origColor ?? 0x888888) : 0x555555);
+    if (child.isMesh) {
+      child.material.color.setHex(enabled ? (child.userData.origColor ?? 0x888888) : 0x444444);
+      if (child.material.emissive) {
+        child.material.emissiveIntensity = enabled ? 0.7 : 0;
+      }
+    }
+    if (child.isSprite && child.userData.isGlow) {
+      child.userData.disabled = !enabled;
+    }
   });
 }
 
 // ── Lab: research facility ────────────────────────────────────
 function createLabMarker(lab, isPlayer) {
-  const CB = isPlayer ? 0x1e5220 : 0x521818;   // dark base / wing
-  const CM = isPlayer ? 0x2e8a32 : 0x8a2e2e;   // main body
-  const CR = isPlayer ? 0x3aaa3a : 0xaa3a3a;   // roof accent
-  const CA = isPlayer ? 0x88ee44 : 0xee8844;   // antenna
+  const CB  = isPlayer ? 0x1a4a1e : 0x4a1a1a;   // dark base
+  const CM  = isPlayer ? 0x2a7a30 : 0x7a2a2a;   // main body
+  const CR  = isPlayer ? 0x33993a : 0x993333;   // roof
+  const CA  = isPlayer ? 0x66ff44 : 0xff8833;   // antenna (emissive)
+  const GC  = isPlayer ? 0x44ff44 : 0xff4422;   // glow colour
 
   const g = new THREE.Group();
 
-  const fnd  = mkPart(new THREE.BoxGeometry(0.030, 0.003, 0.024), CB);
+  const fnd  = mkPart(new THREE.BoxGeometry(0.032, 0.003, 0.026), CB);
   fnd.position.set(0, 0.0015, 0);
 
-  const body = mkPart(new THREE.BoxGeometry(0.018, 0.018, 0.014), CM);
-  body.position.set(0.002, 0.012, 0);
+  const body = mkPart(new THREE.BoxGeometry(0.020, 0.020, 0.015), CM);
+  body.position.set(0.002, 0.013, 0);
 
-  const roof = mkPart(new THREE.BoxGeometry(0.022, 0.0025, 0.018), CR);
-  roof.position.set(0.002, 0.0215, 0);
+  const roof = mkPart(new THREE.BoxGeometry(0.024, 0.003, 0.019), CR);
+  roof.position.set(0.002, 0.0245, 0);
 
-  const wing = mkPart(new THREE.BoxGeometry(0.010, 0.011, 0.010), CB);
-  wing.position.set(-0.013, 0.0085, 0);
+  const wing = mkPart(new THREE.BoxGeometry(0.011, 0.012, 0.011), CB);
+  wing.position.set(-0.014, 0.009, 0);
 
-  const mast = mkPart(new THREE.CylinderGeometry(0.0007, 0.0009, 0.024, 4), CA);
-  mast.position.set(0.005, 0.034, 0);
+  // Antenna mast — emissive so it glows
+  const mast = mkPart(new THREE.CylinderGeometry(0.0008, 0.001, 0.028, 5), CA, CA);
+  mast.position.set(0.005, 0.038, 0);
 
-  const cross = mkPart(new THREE.BoxGeometry(0.010, 0.001, 0.001), CA);
-  cross.position.set(0.005, 0.044, 0);
+  // Cross-arms
+  const arm1 = mkPart(new THREE.BoxGeometry(0.014, 0.0012, 0.0012), CA, CA);
+  arm1.position.set(0.005, 0.044, 0);
 
-  g.add(fnd, body, roof, wing, mast, cross);
+  const arm2 = mkPart(new THREE.BoxGeometry(0.009, 0.0012, 0.0012), CA, CA);
+  arm2.position.set(0.005, 0.049, 0);
+
+  // Beacon tip
+  const tip = mkPart(new THREE.SphereGeometry(0.002, 6, 4), CA, CA);
+  tip.position.set(0.005, 0.054, 0);
+  tip.userData.isBeacon = true;
+
+  const glow = createGlowSprite(GC, 0.09);
+  glow.position.set(0, 0.002, 0);
+
+  g.add(fnd, body, roof, wing, mast, arm1, arm2, tip, glow);
   placeGroup(g, lab.lat, lab.lon);
   g.userData.labId    = lab.id;
   g.userData.isPlayer = isPlayer;
@@ -438,32 +492,42 @@ function createLabMarker(lab, isPlayer) {
   return g;
 }
 
-// ── Reactor: containment vessel + cooling tower ───────────────
+// ── Reactor: containment vessel + cooling towers ──────────────
 function createReactorMarker(reactor, isPlayer) {
-  const CB = isPlayer ? 0x0e5238 : 0x602a08;   // dark base
-  const CM = isPlayer ? 0x1a7a5a : 0x8a4010;   // main vessel
-  const CD = isPlayer ? 0x2aaa7a : 0xcc6622;   // dome / band
-  const CC = isPlayer ? 0x226644 : 0x7a3818;   // cooling tower
+  const CB  = isPlayer ? 0x0a3a28 : 0x3a1a06;   // dark base
+  const CM  = isPlayer ? 0x186650 : 0x7a380e;   // vessel
+  const CD  = isPlayer ? 0x22cc88 : 0xee7722;   // dome (emissive)
+  const CC  = isPlayer ? 0x1a5540 : 0x6a3010;   // cooling tower
+  const GC  = isPlayer ? 0x00ffcc : 0xff8800;   // glow colour
 
   const g = new THREE.Group();
 
-  const fnd = mkPart(new THREE.CylinderGeometry(0.020, 0.022, 0.004, 10), CB);
+  const fnd = mkPart(new THREE.CylinderGeometry(0.022, 0.024, 0.004, 12), CB);
   fnd.position.set(0, 0.002, 0);
 
-  const vessel = mkPart(new THREE.CylinderGeometry(0.015, 0.015, 0.022, 10), CM);
-  vessel.position.set(0, 0.015, 0);
+  const vessel = mkPart(new THREE.CylinderGeometry(0.016, 0.016, 0.024, 12), CM);
+  vessel.position.set(0, 0.016, 0);
 
-  const band = mkPart(new THREE.TorusGeometry(0.016, 0.0018, 4, 14), CD);
-  band.position.set(0, 0.012, 0);
+  const band = mkPart(new THREE.TorusGeometry(0.017, 0.002, 5, 16), CD, CD);
+  band.position.set(0, 0.014, 0);
   band.rotation.x = Math.PI / 2;
 
-  const dome = mkPart(new THREE.ConeGeometry(0.015, 0.013, 10), CD);
-  dome.position.set(0, 0.032, 0);
+  // Dome — emissive glow (reactor core indicator)
+  const dome = mkPart(new THREE.SphereGeometry(0.016, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), CD, CD);
+  dome.position.set(0, 0.028, 0);
 
-  const cool = mkPart(new THREE.CylinderGeometry(0.005, 0.011, 0.030, 8), CC);
-  cool.position.set(0.017, 0.023, 0.005);
+  // Primary cooling tower
+  const cool1 = mkPart(new THREE.CylinderGeometry(0.005, 0.013, 0.036, 9), CC);
+  cool1.position.set(0.020, 0.022, 0.004);
 
-  g.add(fnd, vessel, band, dome, cool);
+  // Secondary cooling tower (slightly smaller)
+  const cool2 = mkPart(new THREE.CylinderGeometry(0.004, 0.010, 0.028, 9), CC);
+  cool2.position.set(-0.018, 0.018, -0.006);
+
+  const glow = createGlowSprite(GC, 0.10);
+  glow.position.set(0, 0.002, 0);
+
+  g.add(fnd, vessel, band, dome, cool1, cool2, glow);
   placeGroup(g, reactor.lat, reactor.lon);
   g.userData.reactorId = reactor.id;
   MARKERS.add(g);
@@ -473,31 +537,38 @@ function createReactorMarker(reactor, isPlayer) {
 
 // ── Jammer: signal transmission tower ────────────────────────
 function createJammerMarker(jammer, isPlayer) {
-  const CB = isPlayer ? 0xaa7700 : 0x991400;   // base structure
-  const CM = isPlayer ? 0xddaa00 : 0xdd2200;   // mast / arms
-  const CT = isPlayer ? 0xffdd22 : 0xff4422;   // tip
+  const CB  = isPlayer ? 0x7a5500 : 0x771000;   // base
+  const CM  = isPlayer ? 0xcc9900 : 0xcc2000;   // mast
+  const CA  = isPlayer ? 0xffee33 : 0xff4422;   // arms (emissive)
+  const GC  = isPlayer ? 0xffdd00 : 0xff3300;   // glow
 
   const g = new THREE.Group();
 
-  const pad = mkPart(new THREE.BoxGeometry(0.014, 0.003, 0.014), CB);
+  const pad = mkPart(new THREE.BoxGeometry(0.016, 0.003, 0.016), CB);
   pad.position.set(0, 0.0015, 0);
 
-  const mast = mkPart(new THREE.CylinderGeometry(0.0010, 0.0013, 0.050, 4), CM);
-  mast.position.set(0, 0.028, 0);
+  const mast = mkPart(new THREE.CylinderGeometry(0.0011, 0.0014, 0.054, 5), CM);
+  mast.position.set(0, 0.030, 0);
 
-  const arm1 = mkPart(new THREE.BoxGeometry(0.038, 0.0012, 0.0012), CM);
-  arm1.position.set(0, 0.013, 0);
+  // Three cross-arms — all emissive, tapering inward
+  const arm1 = mkPart(new THREE.BoxGeometry(0.042, 0.0013, 0.0013), CA, CA);
+  arm1.position.set(0, 0.012, 0);
 
-  const arm2 = mkPart(new THREE.BoxGeometry(0.028, 0.0012, 0.0012), CM);
-  arm2.position.set(0, 0.026, 0);
+  const arm2 = mkPart(new THREE.BoxGeometry(0.030, 0.0013, 0.0013), CA, CA);
+  arm2.position.set(0, 0.025, 0);
 
-  const arm3 = mkPart(new THREE.BoxGeometry(0.018, 0.0012, 0.0012), CM);
-  arm3.position.set(0, 0.037, 0);
+  const arm3 = mkPart(new THREE.BoxGeometry(0.018, 0.0013, 0.0013), CA, CA);
+  arm3.position.set(0, 0.038, 0);
 
-  const tip = mkPart(new THREE.SphereGeometry(0.003, 5, 4), CT);
-  tip.position.set(0, 0.054, 0);
+  // Glowing tip beacon
+  const tip = mkPart(new THREE.SphereGeometry(0.0035, 6, 4), CA, CA);
+  tip.position.set(0, 0.058, 0);
+  tip.userData.isBeacon = true;
 
-  g.add(pad, mast, arm1, arm2, arm3, tip);
+  const glow = createGlowSprite(GC, 0.09);
+  glow.position.set(0, 0.002, 0);
+
+  g.add(pad, mast, arm1, arm2, arm3, tip, glow);
   placeGroup(g, jammer.lat, jammer.lon);
   g.userData.jammerId = jammer.id;
   MARKERS.add(g);
@@ -507,26 +578,41 @@ function createJammerMarker(jammer, isPlayer) {
 
 // ── Silo: underground launch facility + emerging missile ──────
 function createSiloMarker(silo, isPlayer) {
-  const CR = isPlayer ? 0x1a3a7a : 0x7a1a1a;   // outer rim
-  const CS = isPlayer ? 0x080814 : 0x100808;   // inner shaft (dark)
-  const CM = isPlayer ? 0xb0c4de : 0xe0c0b8;   // missile body
-  const CN = isPlayer ? 0xd0e8ff : 0xffd0c8;   // nose cone
+  const CR  = isPlayer ? 0x1a3a7a : 0x7a1a1a;   // outer rim
+  const CS  = isPlayer ? 0x060810 : 0x100606;   // inner shaft
+  const CM  = isPlayer ? 0x8899bb : 0xbb8888;   // missile body
+  const CN  = isPlayer ? 0xaaddff : 0xffaaaa;   // nose (emissive)
+  const GC  = isPlayer ? 0x4488ff : 0xff3333;   // glow colour
 
   const g = new THREE.Group();
 
-  const rim = mkPart(new THREE.CylinderGeometry(0.018, 0.020, 0.007, 12), CR);
-  rim.position.set(0, 0.0035, 0);
+  // Concrete rim — slightly larger + warning stripes via colour
+  const rim = mkPart(new THREE.CylinderGeometry(0.020, 0.022, 0.006, 14), CR);
+  rim.position.set(0, 0.003, 0);
 
-  const shaft = mkPart(new THREE.CylinderGeometry(0.012, 0.012, 0.007, 10), CS);
-  shaft.position.set(0, 0.0035, 0);
+  // Dark shaft interior
+  const shaft = mkPart(new THREE.CylinderGeometry(0.013, 0.013, 0.006, 12), CS);
+  shaft.position.set(0, 0.003, 0);
 
-  const mbody = mkPart(new THREE.CylinderGeometry(0.005, 0.007, 0.038, 8), CM);
-  mbody.position.set(0, 0.026, 0);
+  // Missile body
+  const mbody = mkPart(new THREE.CylinderGeometry(0.0055, 0.008, 0.042, 9), CM);
+  mbody.position.set(0, 0.028, 0);
 
-  const nose = mkPart(new THREE.ConeGeometry(0.006, 0.016, 8), CN);
-  nose.position.set(0, 0.053, 0);
+  // Fins (two thin boxes at base of missile)
+  const fin1 = mkPart(new THREE.BoxGeometry(0.016, 0.006, 0.002), CR);
+  fin1.position.set(0, 0.010, 0);
+  const fin2 = mkPart(new THREE.BoxGeometry(0.002, 0.006, 0.016), CR);
+  fin2.position.set(0, 0.010, 0);
 
-  g.add(rim, shaft, mbody, nose);
+  // Nose cone — emissive warhead indicator
+  const nose = mkPart(new THREE.ConeGeometry(0.0058, 0.018, 9), CN, CN);
+  nose.position.set(0, 0.058, 0);
+  nose.userData.isBeacon = true;
+
+  const glow = createGlowSprite(GC, 0.09);
+  glow.position.set(0, 0.002, 0);
+
+  g.add(rim, shaft, mbody, fin1, fin2, nose, glow);
   placeGroup(g, silo.lat, silo.lon);
   g.userData.siloId = silo.id;
   MARKERS.add(g);
@@ -716,6 +802,17 @@ const clock = new THREE.Clock();
   for (const m of fogMarkers) {
     m.material.opacity = 0.35 + 0.3 * Math.sin(t * 2.5 + m.position.x * 8);
   }
+
+  // Pulse building glow sprites + beacon tips
+  MARKERS.traverse(child => {
+    if (child.isSprite && child.userData.isGlow) {
+      const base = child.userData.disabled ? 0.08 : 0.55;
+      child.material.opacity = base + (child.userData.disabled ? 0 : 0.35) * Math.sin(t * 2.2 + child.userData.phase);
+    }
+    if (child.isMesh && child.userData.isBeacon && child.material.emissiveIntensity > 0) {
+      child.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 3.5 + child.userData.phase || 0);
+    }
+  });
 
   update();
   renderer.render(scene, camera);
