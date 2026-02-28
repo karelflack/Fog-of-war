@@ -400,8 +400,9 @@ function placeGroup(group, lat, lon) {
   group.position.copy(pos);
 }
 
-// Billboard glow sprite — always faces camera, additive blend
+// Surface-aligned glow pad — flat circle on the globe, can't bleed through
 function createGlowSprite(hexColor, size = 0.09) {
+  const radius = size * 0.5;
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const ctx2 = c.getContext('2d');
@@ -413,17 +414,22 @@ function createGlowSprite(hexColor, size = 0.09) {
   grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
   ctx2.fillStyle = grad;
   ctx2.fillRect(0, 0, 64, 64);
-  const mat = new THREE.SpriteMaterial({
-    map: new THREE.CanvasTexture(c),
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    transparent: true,
-  });
-  const sprite = new THREE.Sprite(mat);
-  sprite.scale.setScalar(size);
-  sprite.userData.isGlow = true;
-  sprite.userData.phase  = Math.random() * Math.PI * 2;
-  return sprite;
+  const mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(radius, 24),
+    new THREE.MeshBasicMaterial({
+      map: new THREE.CanvasTexture(c),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      side: THREE.FrontSide,
+    })
+  );
+  // Rotate flat onto the local XZ plane (y = up in the building's local space)
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(0, 0.001, 0);
+  mesh.userData.isGlow = true;
+  mesh.userData.phase  = Math.random() * Math.PI * 2;
+  return mesh;
 }
 
 // Set all child mesh colours — used for active/sabotaged state
@@ -436,7 +442,7 @@ function setMarkerEnabled(marker, enabled) {
         child.material.emissiveIntensity = enabled ? 0.7 : 0;
       }
     }
-    if (child.isSprite && child.userData.isGlow) {
+    if (child.isMesh && child.userData.isGlow) {
       child.userData.disabled = !enabled;
     }
   });
@@ -805,7 +811,7 @@ const clock = new THREE.Clock();
 
   // Pulse building glow sprites + beacon tips
   MARKERS.traverse(child => {
-    if (child.isSprite && child.userData.isGlow) {
+    if (child.isMesh && child.userData.isGlow) {
       const base = child.userData.disabled ? 0.08 : 0.55;
       child.material.opacity = base + (child.userData.disabled ? 0 : 0.35) * Math.sin(t * 2.2 + child.userData.phase);
     }
