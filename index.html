@@ -43,6 +43,7 @@
         <li><b>Lab (500c)</b> — Generates science over time. Place several across different regions. Can be sabotaged and temporarily disabled.</li>
         <li><b>Reactor (700c)</b> — Generates depleted uranium. Build multiple — uranium takes time to fill. Can be found and permanently destroyed.</li>
         <li><b>Rocket Silo (1200c)</b> — Required to launch. Only one can be built. A prime sabotage target — hide it or protect it with jammers.</li>
+        <li><b>Oil Field (600c)</b> — Generates +4c/s passive income. Makes you a STEAL target — protect with jammers. Locate and drain enemy oil fields using RECON then STEAL.</li>
         <li><b>Jammer (600c)</b> — Dual-purpose: near your labs it penalises enemy operations (−28% success). Near enemy labs it slows their science by 50%. Enemy jammers are hidden until swept or reconed.</li>
       </ul>
     </div>
@@ -51,7 +52,7 @@
       <div class="fs-section-hdr">Operations — right sidebar</div>
       <ul>
         <li><b>RECON (300c · 45s)</b> — Scans a radius around your click. Reveals enemy labs, jammers, reactors, and silos in range.</li>
-        <li><b>STEAL (500c · 70s)</b> — Targets a known or estimated enemy region. On success, transfers a portion of their science to you.</li>
+        <li><b>STEAL (500c · 70s)</b> — If targeted near a revealed enemy oil field: drains +175c from them (−250c to enemy). Otherwise steals science (+8%). Use RECON to locate oil fields first.</li>
         <li><b>SABOTAGE (700c · 100s)</b> — Click near a revealed enemy structure. Permanently destroys jammers, reactors, and silos. Disables labs for 2 minutes.</li>
       </ul>
     </div>
@@ -260,6 +261,9 @@
   </button>
   <button class="btn" id="btn-reactor" onclick="G.enterReactorMode()">
     Build Reactor<br><span class="cost-tag">700c — +0.10 uranium/s</span>
+  </button>
+  <button class="btn" id="btn-oilfield" onclick="G.enterOilFieldMode()">
+    Build Oil Field<br><span class="cost-tag">600c — +4c/s · STEAL target</span>
   </button>
   <button class="btn" id="btn-silo" onclick="G.enterSiloMode()">
     Build Silo<br><span class="cost-tag">1200c — required to launch</span>

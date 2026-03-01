@@ -4,23 +4,25 @@
 //  CONSTANTS
 // ═══════════════════════════════════════════════════════════════
 const C = {
-  LAB_COST:           500,
-  CREDITS_BASE:       5,
-  CREDITS_PER_LAB:    3,
-  SCI_PER_LAB:        0.04,   // per second per active lab
-  ASSEMBLY_TIME:      240000, // 4 minutes
-  AI_TICK:            20000,
-  DETECT_CHANCE:      0.30,
-  SABOTAGE_DUR:       120000, // 2 minutes
-  RECON_RADIUS:       0.32,   // chord distance on unit sphere ≈ ~2000 km
-  JAMMER_COST:        600,
-  SWEEP_COST:         1500,
-  JAMMER_RADIUS:      0.22,   // effect radius (chord distance)
-  SWEEP_RADIUS:       0.20,   // per-lab scan radius
-  JAMMER_DEF_PENALTY: 0.28,   // op success reduction near friendly jammer
-  SILO_COST:          1200,
-  REACTOR_COST:       700,
-  DU_PER_REACTOR:     0.10,   // depleted uranium per second per reactor
+  LAB_COST:              500,
+  CREDITS_BASE:          5,
+  CREDITS_PER_LAB:       3,
+  OILFIELD_COST:         600,
+  CREDITS_PER_OILFIELD:  4,   // credits per second per oil field
+  SCI_PER_LAB:           0.04,   // per second per active lab
+  ASSEMBLY_TIME:         240000, // 4 minutes
+  AI_TICK:               20000,
+  DETECT_CHANCE:         0.30,
+  SABOTAGE_DUR:          120000, // 2 minutes
+  RECON_RADIUS:          0.32,   // chord distance on unit sphere ≈ ~2000 km
+  JAMMER_COST:           600,
+  SWEEP_COST:            1500,
+  JAMMER_RADIUS:         0.22,   // effect radius (chord distance)
+  SWEEP_RADIUS:          0.20,   // per-lab scan radius
+  JAMMER_DEF_PENALTY:    0.28,   // op success reduction near friendly jammer
+  SILO_COST:             1200,
+  REACTOR_COST:          700,
+  DU_PER_REACTOR:        0.10,   // depleted uranium per second per reactor
 };
 
 // Nation capitals for ICBM targeting
@@ -79,10 +81,11 @@ const SETTINGS = {
 
 function applySettings() {
   const sm = { short: 2.5, normal: 1.0, long: 0.5 }[SETTINGS.speed];
-  C.SCI_PER_LAB     = +(0.04  * sm).toFixed(4);
-  C.DU_PER_REACTOR  = +(0.10  * sm).toFixed(4);
-  C.CREDITS_BASE    = Math.round(5 * sm);
-  C.CREDITS_PER_LAB = Math.round(3 * sm);
+  C.SCI_PER_LAB           = +(0.04  * sm).toFixed(4);
+  C.DU_PER_REACTOR        = +(0.10  * sm).toFixed(4);
+  C.CREDITS_BASE          = Math.round(5 * sm);
+  C.CREDITS_PER_LAB       = Math.round(3 * sm);
+  C.CREDITS_PER_OILFIELD  = Math.round(4 * sm);
   C.ASSEMBLY_TIME   = Math.round(240000 / sm);
   C.SABOTAGE_DUR    = Math.round(120000 / sm);
   const dm = { easy: 2.0, normal: 1.0, hard: 0.55 }[SETTINGS.difficulty];
@@ -237,6 +240,16 @@ class Silo {
   }
 }
 
+class OilField {
+  constructor(lat, lon, region, ownerId) {
+    this.id      = uid();
+    this.lat     = lat;  this.lon = lon;
+    this.region  = region;
+    this.ownerId = ownerId;
+    this.marker  = null;
+  }
+}
+
 class Player {
   constructor(id, isHuman) {
     this.id = id;
@@ -250,6 +263,8 @@ class Player {
     this.reactors = [];
     this.silo = null;
     this.depletedUranium = 0;
+    this.oilFields = [];
+    this.revealedEnemyOilFields = [];
     this.revealedEnemyJammers = [];
     this.revealedEnemyReactors = [];
     this.revealedEnemySilo = null;
@@ -263,7 +278,11 @@ class Player {
   activeLabs() { return this.labs.filter(l => l.isActive()); }
   addLab(lab) {
     this.labs.push(lab);
-    this.creditsPerSec = C.CREDITS_BASE + this.labs.length * C.CREDITS_PER_LAB;
+    this.creditsPerSec = C.CREDITS_BASE + this.labs.length * C.CREDITS_PER_LAB + this.oilFields.length * C.CREDITS_PER_OILFIELD;
+  }
+  addOilField(of_) {
+    this.oilFields.push(of_);
+    this.creditsPerSec = C.CREDITS_BASE + this.labs.length * C.CREDITS_PER_LAB + this.oilFields.length * C.CREDITS_PER_OILFIELD;
   }
   startAssembly() {
     if (this.science >= 100 && this.depletedUranium >= 100 && this.silo &&
@@ -286,16 +305,17 @@ class Player {
 //  GAME STATE + LOOP
 // ═══════════════════════════════════════════════════════════════
 const state = {
-  player:      null,
-  ai:          null,
-  gameOver:    false,
-  buildMode:   false,
-  jammerMode:  false,
-  reactorMode: false,
-  siloMode:    false,
-  pendingOp:   null,
-  lastUpdate:  0,
-  lastAiTick:  0,
+  player:       null,
+  ai:           null,
+  gameOver:     false,
+  buildMode:    false,
+  jammerMode:   false,
+  reactorMode:  false,
+  siloMode:     false,
+  oilFieldMode: false,
+  pendingOp:    null,
+  lastUpdate:   0,
+  lastAiTick:   0,
 };
 
 let _lastAssemblyTick = 0;
@@ -450,7 +470,7 @@ function updateUI() {
   const al = p.activeLabs().length;
   document.getElementById('sl-labs').textContent =
     `Labs: ${p.labs.length} (${al} active) · Jammers: ${p.jammers.length}` +
-    `\nReactors: ${p.reactors.length} · Silo: ${p.silo ? '✓ placed' : 'none'}`;
+    `\nReactors: ${p.reactors.length} · Oil Fields: ${p.oilFields.length} · Silo: ${p.silo ? '✓ placed' : 'none'}`;
 
   let effectiveSciRate = 0;
   for (const lab of p.activeLabs()) {
@@ -475,6 +495,9 @@ function updateUI() {
   for (const r of p.reactors) {
     detailLines.push(`• Reactor ${r.region ? r.region.name.split(' ')[0] : '?'} ✓`);
   }
+  for (const of_ of p.oilFields) {
+    detailLines.push(`• Oil Field ${of_.region ? of_.region.name.split(' ')[0] : '?'} +${C.CREDITS_PER_OILFIELD}c/s`);
+  }
   if (p.silo) {
     detailLines.push(`• Silo ${p.silo.region ? p.silo.region.name.split(' ')[0] : '?'} ✓`);
   }
@@ -487,6 +510,7 @@ function updateUI() {
   document.getElementById('btn-jammer').disabled   = p.credits < C.JAMMER_COST;
   document.getElementById('btn-reactor').disabled  = p.credits < C.REACTOR_COST;
   document.getElementById('btn-silo').disabled     = p.credits < C.SILO_COST || !!p.silo;
+  document.getElementById('btn-oilfield').disabled = p.credits < C.OILFIELD_COST;
   document.getElementById('btn-recon').disabled    = p.credits < OPS.RECON.cost;
   document.getElementById('btn-steal').disabled    = p.credits < OPS.STEAL.cost;
   document.getElementById('btn-sabotage').disabled = p.credits < OPS.SABOTAGE.cost;
@@ -506,12 +530,13 @@ function updateUI() {
   }
 
   // Intel
-  const intel          = p.revealedEnemyLabs;
-  const jammerIntel    = p.revealedEnemyJammers;
-  const reactorIntel   = p.revealedEnemyReactors;
-  const siloIntel      = p.revealedEnemySilo;
-  const intelEl        = document.getElementById('sr-intel');
-  const hasIntel = intel.length || jammerIntel.length || reactorIntel.length || siloIntel;
+  const intel           = p.revealedEnemyLabs;
+  const jammerIntel     = p.revealedEnemyJammers;
+  const reactorIntel    = p.revealedEnemyReactors;
+  const siloIntel       = p.revealedEnemySilo;
+  const oilFieldIntel   = p.revealedEnemyOilFields;
+  const intelEl         = document.getElementById('sr-intel');
+  const hasIntel = intel.length || jammerIntel.length || reactorIntel.length || siloIntel || oilFieldIntel.length;
   if (!hasIntel) {
     intelEl.textContent = 'No intel. Use RECON or SWEEP to gather data.';
   } else {
@@ -534,6 +559,11 @@ function updateUI() {
       if (txt) txt += '\n';
       txt += `Enemy silo located:\n• ${siloIntel.region ? siloIntel.region.name : '?'} (${siloIntel.lat.toFixed(0)}°, ${siloIntel.lon.toFixed(0)}°) ← SABOTAGE`;
     }
+    if (oilFieldIntel.length) {
+      if (txt) txt += '\n';
+      txt += `${oilFieldIntel.length} oil field(s) located:\n` +
+        oilFieldIntel.map(of_ => `• ${of_.region ? of_.region.name : '?'} (${of_.lat.toFixed(0)}°, ${of_.lon.toFixed(0)}°) ← STEAL / SABOTAGE`).join('\n');
+    }
     intelEl.textContent = txt;
   }
 }
@@ -548,9 +578,10 @@ function handleClick(e) {
   const { lat, lon } = hit;
   const region = getRegion(lat, lon);
 
-  if (state.siloMode)    { doBuildSilo(lat, lon, region);    exitSiloMode();    return; }
-  if (state.reactorMode) { doBuildReactor(lat, lon, region); exitReactorMode(); return; }
-  if (state.jammerMode)  { doBuildJammer(lat, lon, region);  exitJammerMode();  return; }
+  if (state.siloMode)     { doBuildSilo(lat, lon, region);     exitSiloMode();     return; }
+  if (state.reactorMode)  { doBuildReactor(lat, lon, region);  exitReactorMode();  return; }
+  if (state.jammerMode)   { doBuildJammer(lat, lon, region);   exitJammerMode();   return; }
+  if (state.oilFieldMode) { doBuildOilField(lat, lon, region); exitOilFieldMode(); return; }
 
   if (state.buildMode) {
     doBuildLab(lat, lon, region);
@@ -578,10 +609,11 @@ let ctxTarget = { lat: 0, lon: 0, region: null };
 function openCtxMenu(px, py, lat, lon, region) {
   ctxTarget = { lat, lon, region };
   const p = state.player;
-  const canLab     = p.credits >= nextLabCost(p)  && isOnLand(lat, lon);
-  const canJam     = p.credits >= C.JAMMER_COST  && isOnLand(lat, lon);
-  const canReactor = p.credits >= C.REACTOR_COST && isOnLand(lat, lon);
-  const canSilo    = p.credits >= C.SILO_COST    && isOnLand(lat, lon) && !p.silo;
+  const canLab      = p.credits >= nextLabCost(p)   && isOnLand(lat, lon);
+  const canJam      = p.credits >= C.JAMMER_COST   && isOnLand(lat, lon);
+  const canReactor  = p.credits >= C.REACTOR_COST  && isOnLand(lat, lon);
+  const canSilo     = p.credits >= C.SILO_COST     && isOnLand(lat, lon) && !p.silo;
+  const canOilField = p.credits >= C.OILFIELD_COST && isOnLand(lat, lon);
   const canR    = p.credits >= OPS.RECON.cost;
   const canSt   = p.credits >= OPS.STEAL.cost;
   const canSab  = p.credits >= OPS.SABOTAGE.cost;
@@ -601,6 +633,9 @@ function openCtxMenu(px, py, lat, lon, region) {
     <div class="ctx-row ${canSilo ? '' : 'off'}" id="ctx-silo">
       Build Silo <span class="ctx-c">${C.SILO_COST}c</span>
     </div>
+    <div class="ctx-row ${canOilField ? '' : 'off'}" id="ctx-oilfield">
+      Build Oil Field <span class="ctx-c">${C.OILFIELD_COST}c</span>
+    </div>
     <hr class="ctx-div">
     <div class="ctx-row ${canR   ? '' : 'off'}" id="ctx-recon">
       RECON <span class="ctx-c">300c · 65%</span>
@@ -613,10 +648,11 @@ function openCtxMenu(px, py, lat, lon, region) {
     </div>
   `;
 
-  if (canLab)  ctxEl.querySelector('#ctx-lab').onclick    = () => { closeCtx(); doBuildLab(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
-  if (canJam)     ctxEl.querySelector('#ctx-jammer').onclick  = () => { closeCtx(); doBuildJammer(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
-  if (canReactor) ctxEl.querySelector('#ctx-reactor').onclick = () => { closeCtx(); doBuildReactor(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
-  if (canSilo)    ctxEl.querySelector('#ctx-silo').onclick    = () => { closeCtx(); doBuildSilo(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canLab)      ctxEl.querySelector('#ctx-lab').onclick      = () => { closeCtx(); doBuildLab(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canJam)      ctxEl.querySelector('#ctx-jammer').onclick   = () => { closeCtx(); doBuildJammer(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canReactor)  ctxEl.querySelector('#ctx-reactor').onclick  = () => { closeCtx(); doBuildReactor(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canSilo)     ctxEl.querySelector('#ctx-silo').onclick     = () => { closeCtx(); doBuildSilo(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
+  if (canOilField) ctxEl.querySelector('#ctx-oilfield').onclick = () => { closeCtx(); doBuildOilField(ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
   if (canR)    ctxEl.querySelector('#ctx-recon').onclick  = () => { closeCtx(); doLaunchOp('RECON',    ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
   if (canSt)   ctxEl.querySelector('#ctx-steal').onclick  = () => { closeCtx(); doLaunchOp('STEAL',    ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
   if (canSab)  ctxEl.querySelector('#ctx-sab').onclick    = () => { closeCtx(); doLaunchOp('SABOTAGE', ctxTarget.lat, ctxTarget.lon, ctxTarget.region); };
@@ -638,7 +674,7 @@ document.addEventListener('mousedown', e => {
 function enterBuildMode() {
   const cost = nextLabCost(state.player);
   if (state.player.credits < cost) { toast(`Need ${cost}c to build a lab`); return; }
-  exitJammerMode(); exitReactorMode(); exitSiloMode();
+  exitJammerMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode();
   state.buildMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -677,7 +713,7 @@ function doBuildLab(lat, lon, region) {
 // ═══════════════════════════════════════════════════════════════
 function enterJammerMode() {
   if (state.player.credits < C.JAMMER_COST) { toast(`Need ${C.JAMMER_COST}c to deploy jammer`); return; }
-  exitBuildMode(); exitReactorMode(); exitSiloMode();
+  exitBuildMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode();
   state.jammerMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -711,7 +747,7 @@ function doBuildJammer(lat, lon, region) {
 // ═══════════════════════════════════════════════════════════════
 function enterReactorMode() {
   if (state.player.credits < C.REACTOR_COST) { toast(`Need ${C.REACTOR_COST}c to build reactor`); return; }
-  exitBuildMode(); exitJammerMode(); exitSiloMode();
+  exitBuildMode(); exitJammerMode(); exitSiloMode(); exitOilFieldMode();
   state.reactorMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -747,7 +783,7 @@ function enterSiloMode() {
   const p = state.player;
   if (p.credits < C.SILO_COST) { toast(`Need ${C.SILO_COST}c to build silo`); return; }
   if (p.silo) { toast('You already have a rocket silo!'); return; }
-  exitBuildMode(); exitJammerMode(); exitReactorMode();
+  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitOilFieldMode();
   state.siloMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -774,6 +810,38 @@ function doBuildSilo(lat, lon, region) {
   log(`Rocket silo built in ${region ? region.name : 'unknown'}`, 'ok');
   toast('Rocket silo ready! Reach 100% science + uranium to launch.');
   if (MP.active) MP.send('BUILD_SILO', { id: silo.id, lat, lon, regionId: region?.id || null });
+  updateUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  OIL FIELD PLACEMENT
+// ═══════════════════════════════════════════════════════════════
+function enterOilFieldMode() {
+  if (state.player.credits < C.OILFIELD_COST) { toast(`Need ${C.OILFIELD_COST}c to build oil field`); return; }
+  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitSiloMode();
+  state.oilFieldMode = true;
+  state.pendingOp = null;
+  clearOpBtns();
+  showTargetInd(`Click globe to build oil field (${C.OILFIELD_COST}c) — ESC to cancel`);
+  document.getElementById('btn-oilfield').classList.add('active');
+}
+
+function exitOilFieldMode() {
+  state.oilFieldMode = false;
+  document.getElementById('btn-oilfield')?.classList.remove('active');
+  if (!state.buildMode && !state.jammerMode && !state.reactorMode && !state.siloMode && !state.pendingOp) hideTargetInd();
+}
+
+function doBuildOilField(lat, lon, region) {
+  const p = state.player;
+  if (p.credits < C.OILFIELD_COST) { toast('Not enough credits!'); return; }
+  if (!isOnLand(lat, lon)) { toast('Oil fields must be on land!'); return; }
+  p.credits -= C.OILFIELD_COST;
+  const of_ = new OilField(lat, lon, region, 'player');
+  p.addOilField(of_);
+  createOilFieldMarker(of_, true);
+  log(`Oil field built in ${region ? region.name : 'unknown'} (+${C.CREDITS_PER_OILFIELD}c/s)`, 'ok');
+  toast(`Oil field online! +${C.CREDITS_PER_OILFIELD}c/s`);
   updateUI();
 }
 
@@ -808,6 +876,12 @@ function doSweep() {
     if (!p.revealedEnemySilo && state.ai.silo) {
       if (sv.distanceTo(ll2v3(state.ai.silo.lat, state.ai.silo.lon)) <= C.SWEEP_RADIUS) {
         p.revealedEnemySilo = state.ai.silo; createSiloMarker(state.ai.silo, false); found++;
+      }
+    }
+    for (const of_ of state.ai.oilFields) {
+      if (p.revealedEnemyOilFields.some(x => x.id === of_.id)) continue;
+      if (sv.distanceTo(ll2v3(of_.lat, of_.lon)) <= C.SWEEP_RADIUS) {
+        p.revealedEnemyOilFields.push(of_); createOilFieldMarker(of_, false); found++;
       }
     }
   }
@@ -950,7 +1024,17 @@ function resolveOp(op, attacker, defender) {
         log('RECON: Enemy ROCKET SILO located! SABOTAGE it!', 'ok');
       }
 
-      const hidden = jammersFound.length + reactorsFound.length;
+      const oilFieldsFound = defender.oilFields.filter(of_ =>
+        !attacker.revealedEnemyOilFields.some(x => x.id === of_.id) &&
+        origin.distanceTo(ll2v3(of_.lat, of_.lon)) <= C.RECON_RADIUS
+      );
+      for (const of_ of oilFieldsFound) {
+        attacker.revealedEnemyOilFields.push(of_);
+        createOilFieldMarker(of_, false);
+        log('RECON: Enemy oil field located! Use STEAL to drain it!', 'ok');
+      }
+
+      const hidden = jammersFound.length + reactorsFound.length + oilFieldsFound.length;
       if (hidden > 0)
         log(`RECON: Detected ${hidden} enemy hidden structure(s)!`, 'ok');
       SFX.opSuccess();
@@ -963,18 +1047,42 @@ function resolveOp(op, attacker, defender) {
 
   // ── STEAL ──────────────────────────────────────
   else if (op.type === 'STEAL') {
-    const gain = 8, loss = 4;
-    attacker.science = Math.min(100, attacker.science + gain);
-    defender.science = Math.max(0,   defender.science - loss);
-    if (attacker === state.player) {
-      SFX.opSuccess();
-      log(`STEAL SUCCESS: +${gain}% science!`, 'ok');
-      toast(`+${gain}% science stolen!`);
-      bumpdEstimate(attacker, defender, 10);
+    // Check for a nearby enemy oil field (revealed for player; AI can target any)
+    const targetV = ll2v3(op.lat, op.lon);
+    const availableFields = attacker === state.player
+      ? defender.oilFields.filter(of_ => attacker.revealedEnemyOilFields.some(x => x.id === of_.id))
+      : defender.oilFields;
+    const nearField = availableFields.find(of_ => targetV.distanceTo(ll2v3(of_.lat, of_.lon)) < 0.55);
+
+    if (nearField) {
+      // Credit heist — drain the oil field
+      const stolen = 250, gained = 175;
+      defender.credits = Math.max(0, defender.credits - stolen);
+      attacker.credits += gained;
+      if (attacker === state.player) {
+        SFX.opSuccess();
+        log(`STEAL SUCCESS: +${gained}c siphoned from enemy oil field!`, 'ok');
+        toast(`+${gained}c drained from enemy oil field!`);
+      } else {
+        SFX.alert();
+        log(`⚠ Enemy drained your oil field! −${stolen}c`, 'danger');
+        toast(`Enemy stole ${stolen}c from your oil field!`);
+      }
     } else {
-      SFX.alert();
-      log(`⚠ Enemy stole your science! −${loss}%`, 'danger');
-      toast(`Enemy stole your science! −${loss}%`);
+      // Fallback — steal science
+      const gain = 8, loss = 4;
+      attacker.science = Math.min(100, attacker.science + gain);
+      defender.science = Math.max(0,   defender.science - loss);
+      if (attacker === state.player) {
+        SFX.opSuccess();
+        log(`STEAL SUCCESS: +${gain}% science!`, 'ok');
+        toast(`+${gain}% science stolen!`);
+        bumpdEstimate(attacker, defender, 10);
+      } else {
+        SFX.alert();
+        log(`⚠ Enemy stole your science! −${loss}%`, 'danger');
+        toast(`Enemy stole your science! −${loss}%`);
+      }
     }
   }
 
@@ -994,6 +1102,10 @@ function resolveOp(op, attacker, defender) {
     for (const r of attacker.revealedEnemyReactors) {
       if (r.ownerId === defender.id)
         candidates.push({ kind: 'reactor', obj: r, dist: t3.distanceTo(ll2v3(r.lat, r.lon)) });
+    }
+    for (const of_ of attacker.revealedEnemyOilFields) {
+      if (of_.ownerId === defender.id)
+        candidates.push({ kind: 'oilField', obj: of_, dist: t3.distanceTo(ll2v3(of_.lat, of_.lon)) });
     }
     if (attacker.revealedEnemySilo?.ownerId === defender.id) {
       const s = attacker.revealedEnemySilo;
@@ -1036,6 +1148,15 @@ function resolveOp(op, attacker, defender) {
       attacker.revealedEnemyReactors  = attacker.revealedEnemyReactors.filter(x => x.id !== r.id);
       if (attacker === state.player) { SFX.opSuccess(); log('SABOTAGE SUCCESS: Enemy reactor destroyed! Uranium slows.', 'ok'); toast('Enemy reactor destroyed!'); }
       else { SFX.destroyed(); log('⚠ Your reactor was destroyed!', 'danger'); toast('Your reactor was destroyed!'); }
+
+    } else if (hit.kind === 'oilField') {
+      const of_ = hit.obj;
+      if (of_.marker) { MARKERS.remove(of_.marker); of_.marker = null; }
+      defender.oilFields                 = defender.oilFields.filter(x => x.id !== of_.id);
+      defender.creditsPerSec             = C.CREDITS_BASE + defender.labs.length * C.CREDITS_PER_LAB + defender.oilFields.length * C.CREDITS_PER_OILFIELD;
+      attacker.revealedEnemyOilFields    = attacker.revealedEnemyOilFields.filter(x => x.id !== of_.id);
+      if (attacker === state.player) { SFX.opSuccess(); log('SABOTAGE SUCCESS: Enemy oil field destroyed! Their income drops.', 'ok'); toast('Enemy oil field destroyed!'); }
+      else { SFX.destroyed(); log('⚠ Your oil field was destroyed!', 'danger'); toast('Your oil field was destroyed!'); }
 
     } else if (hit.kind === 'silo') {
       const s = hit.obj;
@@ -1094,6 +1215,11 @@ function aiTick() {
   // Build silo (need it to win — wait until 2+ labs exist)
   if (ai.credits >= C.SILO_COST + 200 && !ai.silo && ai.labs.length >= 2 && Math.random() < 0.65) {
     aiBuildSilo(); return;
+  }
+
+  // Build oil fields (max 3, gives steady income)
+  if (ai.credits >= C.OILFIELD_COST + 200 && ai.oilFields.length < 3 && Math.random() < 0.45) {
+    aiBuildOilField(); return;
   }
 
   // Place a jammer (keep 300c buffer; max 4 jammers)
@@ -1181,6 +1307,12 @@ function aiSweep() {
         ai.revealedEnemySilo = p.silo; found++;
       }
     }
+    for (const of_ of p.oilFields) {
+      if (ai.revealedEnemyOilFields.some(x => x.id === of_.id)) continue;
+      if (sv.distanceTo(ll2v3(of_.lat, of_.lon)) <= C.SWEEP_RADIUS) {
+        ai.revealedEnemyOilFields.push(of_); found++;
+      }
+    }
   }
   if (found > 0) log(`⚠ Enemy sweep detected ${found} of your structures!`, 'warn');
   console.log(`[AI] SWEEP found ${found} player structure(s)`);
@@ -1216,6 +1348,23 @@ function aiBuildSilo() {
   ai.credits -= C.SILO_COST;
   ai.silo = new Silo(lat, lon, region, 'ai');
   console.log(`[AI] Silo built in ${region.name}`);
+}
+
+function aiBuildOilField() {
+  const ai = state.ai;
+  if (ai.credits < C.OILFIELD_COST) return;
+  let lat, lon, region, attempts = 0;
+  do {
+    const keys = Object.keys(REGIONS);
+    region = REGIONS[keys[Math.floor(Math.random() * keys.length)]];
+    ({ lat, lon } = randInRegion(region));
+    attempts++;
+  } while (!isOnLand(lat, lon) && attempts < 30);
+  if (!isOnLand(lat, lon)) return;
+  ai.credits -= C.OILFIELD_COST;
+  const of_ = new OilField(lat, lon, region, 'ai');
+  ai.addOilField(of_);
+  console.log(`[AI] Oil field built in ${region.name}`);
 }
 
 function aiPlaceJammer() {
@@ -1259,6 +1408,22 @@ function aiOp(type) {
   ai.credits -= OPS[type].cost;
 
   let lat, lon, region;
+
+  // STEAL priority: target player oil fields (AI intelligence network)
+  if (type === 'STEAL' && p.oilFields.length > 0 && Math.random() < 0.60) {
+    const target = p.oilFields[Math.floor(Math.random() * p.oilFields.length)];
+    lat = target.lat; lon = target.lon; region = target.region;
+    // AI marks it as "known" for STEAL resolution
+    if (!ai.revealedEnemyOilFields.some(x => x.id === target.id)) {
+      ai.revealedEnemyOilFields.push(target);
+    }
+    const op = new Operation(type, lat, lon, region);
+    ai.ops.push(op);
+    console.log(`[AI] ${type} → oil field in ${region ? region.name : '?'}`);
+    setTimeout(() => resolveOp(op, state.ai, state.player), OPS[type].duration);
+    return;
+  }
+
   // SABOTAGE priority: revealed silo > revealed reactors > revealed jammers > labs
   if (type === 'SABOTAGE' && ai.revealedEnemySilo?.ownerId === p.id && Math.random() < 0.85) {
     lat = ai.revealedEnemySilo.lat; lon = ai.revealedEnemySilo.lon; region = ai.revealedEnemySilo.region;
@@ -1458,10 +1623,13 @@ function endGame(playerWon) {
       MARKERS.add(cone); hidden++;
     }
   }
-  // Reveal hidden AI silo and reactors
+  // Reveal hidden AI silo, reactors, and oil fields
   if (state.ai.silo && !state.player.revealedEnemySilo) createSiloMarker(state.ai.silo, false);
   for (const r of state.ai.reactors) {
     if (!state.player.revealedEnemyReactors.some(x => x.id === r.id)) createReactorMarker(r, false);
+  }
+  for (const of_ of state.ai.oilFields) {
+    if (!state.player.revealedEnemyOilFields.some(x => x.id === of_.id)) createOilFieldMarker(of_, false);
   }
 
   for (const m of fogMarkers) MARKERS.remove(m);
@@ -1552,6 +1720,7 @@ document.addEventListener('keydown', e => {
     exitJammerMode();
     exitReactorMode();
     exitSiloMode();
+    exitOilFieldMode();
     state.pendingOp = null;
     clearOpBtns();
     closeCtx();
@@ -1568,7 +1737,7 @@ function init() {
   state.lastAiTick = Date.now();
 
   // Expose helpers for HTML onclick
-  window.G = { enterBuildMode, enterJammerMode, enterReactorMode, enterSiloMode, selectOp, startAssembly, doSweep };
+  window.G = { enterBuildMode, enterJammerMode, enterReactorMode, enterSiloMode, enterOilFieldMode, selectOp, startAssembly, doSweep };
 
   // Give AI an initial lab after a short delay
   setTimeout(() => { if (!state.gameOver) aiBuild(); }, 1500);

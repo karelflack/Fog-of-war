@@ -579,6 +579,100 @@ function createSiloMarker(silo, isPlayer) {
   return g;
 }
 
+// ── Oil Field: nodding-donkey pump jack (animated) ────────────
+function createOilFieldMarker(oilField, isPlayer) {
+  const CB  = isPlayer ? 0x141008 : 0x0c0804;   // concrete pad
+  const CM  = isPlayer ? 0x3a2c1a : 0x221208;   // structural steel
+  const CE  = isPlayer ? 0x28200e : 0x180c04;   // engine house
+  const CW  = isPlayer ? 0x6a5030 : 0x4a1c08;   // counterweight
+  const CL  = isPlayer ? 0xff9900 : 0xff3300;   // safety beacon (emissive)
+
+  const g = new THREE.Group();
+  const PX = 0.002;    // pivot x (slightly forward)
+  const PY = 0.044;    // samson post top height
+
+  // ── Concrete base pad ────────────────────────────────────────
+  const base = mkPart(new THREE.BoxGeometry(0.058, 0.003, 0.042), CB);
+  base.position.set(0, 0.0015, 0);
+
+  // ── Engine house (back of platform) ──────────────────────────
+  const eng = mkPart(new THREE.BoxGeometry(0.022, 0.024, 0.026), CE);
+  eng.position.set(-0.018, 0.014, 0);
+  const engRoof = mkPart(new THREE.BoxGeometry(0.024, 0.005, 0.028), CM);
+  engRoof.position.set(-0.018, 0.027, 0);
+
+  // ── Samson post: 4 legs converging at pivot cap ───────────────
+  const postData = [
+    [PX - 0.011,  0.013, 0.22, -0.22],   // front-left
+    [PX + 0.011,  0.013, -0.22, -0.22],  // front-right
+    [PX - 0.011, -0.013, 0.22,  0.22],   // back-left
+    [PX + 0.011, -0.013, -0.22,  0.22],  // back-right
+  ];
+  for (const [px, pz, rz, rx] of postData) {
+    const post = mkPart(new THREE.BoxGeometry(0.003, 0.050, 0.0045), CM);
+    post.position.set(px, PY * 0.52, pz);
+    post.rotation.z = rz;
+    post.rotation.x = rx;
+    g.add(post);
+  }
+  // Bearing cap at top of Samson post
+  const cap = mkPart(new THREE.BoxGeometry(0.014, 0.007, 0.020), CM);
+  cap.position.set(PX, PY + 0.002, 0);
+
+  g.add(base, eng, engRoof, cap);
+
+  // ── Walking beam pivot group (animated) ──────────────────────
+  const pivot = new THREE.Group();
+  pivot.position.set(PX, PY + 0.005, 0);
+  pivot.userData.isPumpBeam = true;
+  pivot.userData.pumpPhase  = Math.random() * Math.PI * 2;  // random start so multiple pumps don't sync
+
+  // Main walking beam (runs along x-axis)
+  const walkBeam = mkPart(new THREE.BoxGeometry(0.062, 0.0040, 0.0055), CM);
+  walkBeam.position.set(0.002, 0, 0);
+
+  // Horsehead — two-piece downward-curved head at front (+x)
+  const hh1 = mkPart(new THREE.BoxGeometry(0.009, 0.018, 0.006), CM);
+  hh1.position.set(0.035, -0.007, 0);
+  hh1.rotation.z = -0.38;
+  const hh2 = mkPart(new THREE.BoxGeometry(0.013, 0.005, 0.006), CM);
+  hh2.position.set(0.036, -0.018, 0);
+
+  // Polish rod / bridle (hangs from horsehead tip toward wellhead)
+  const rod = mkPart(new THREE.CylinderGeometry(0.0007, 0.0007, 0.014, 4), CM);
+  rod.position.set(0.034, -0.026, 0);
+
+  // Counterweight (heavy block at back end, −x)
+  const cw = mkPart(new THREE.BoxGeometry(0.017, 0.022, 0.011), CW);
+  cw.position.set(-0.027, 0.002, 0);
+
+  // Safety light on counterweight — emissive, blinks with pumpPhase offset
+  const safetyLight = mkPart(new THREE.SphereGeometry(0.003, 6, 4), CL, CL);
+  safetyLight.position.set(-0.027, 0.014, 0.007);
+  safetyLight.userData.isBeacon = true;
+  safetyLight.userData.phase    = pivot.userData.pumpPhase + 0.9;
+
+  // Pitman arm / crank (connects counterweight end to engine below)
+  const crank = mkPart(new THREE.BoxGeometry(0.003, 0.022, 0.004), CM);
+  crank.position.set(-0.019, -0.013, 0);
+  crank.rotation.z = 0.32;
+
+  pivot.add(walkBeam, hh1, hh2, rod, cw, safetyLight, crank);
+  g.add(pivot);
+
+  // ── Wellhead (where rod enters ground) ───────────────────────
+  const wh = mkPart(new THREE.CylinderGeometry(0.003, 0.004, 0.010, 8), CE);
+  wh.position.set(PX + 0.033, 0.005, 0);
+  g.add(wh);
+
+  placeGroup(g, oilField.lat, oilField.lon);
+  g.userData.oilFieldId = oilField.id;
+  g.userData.isPlayer   = isPlayer;
+  MARKERS.add(g);
+  oilField.marker = g;
+  return g;
+}
+
 function createFogMarker(lat, lon, regionId) {
   const pos = ll2v3(lat, lon, 1.003);
   const ring = new THREE.Mesh(
@@ -764,10 +858,14 @@ const clock = new THREE.Clock();
     m.material.opacity = 0.35 + 0.3 * Math.sin(t * 2.5 + m.position.x * 8);
   }
 
-  // Pulse beacon tips on buildings
+  // Pulse beacon tips + animate pump jack walking beams
   MARKERS.traverse(child => {
     if (child.isMesh && child.userData.isBeacon && child.material.emissiveIntensity > 0) {
       child.material.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 3.5 + (child.userData.phase || 0));
+    }
+    if (child.userData.isPumpBeam) {
+      // Nodding donkey: beam rocks ±12° (~0.22 rad), one cycle ~6 seconds
+      child.rotation.z = Math.sin(t * 1.05 + (child.userData.pumpPhase || 0)) * 0.22;
     }
   });
 
