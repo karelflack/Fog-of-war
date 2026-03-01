@@ -742,7 +742,9 @@ const clock = new THREE.Clock();
   const t = clock.getElapsedTime();
 
   // Slow auto-spin when not dragging (always on in menu; respects setting in-game)
-  if (!drag && (SETTINGS.autoSpin || !state.player)) G_GROUP.rotation.y += 0.0003;
+  const _settings = typeof SETTINGS !== 'undefined' ? SETTINGS : null;
+  const _state    = typeof state    !== 'undefined' ? state    : null;
+  if (!drag && (_settings?.autoSpin || !_state?.player)) G_GROUP.rotation.y += 0.0003;
 
   // Expand + fade op rings
   for (const ring of [...RINGS.children]) {
@@ -758,7 +760,7 @@ const clock = new THREE.Clock();
   }
 
   // Pulse fog markers
-  for (const m of fogMarkers) {
+  for (const m of (typeof fogMarkers !== 'undefined' ? fogMarkers : [])) {
     m.material.opacity = 0.35 + 0.3 * Math.sin(t * 2.5 + m.position.x * 8);
   }
 
@@ -769,7 +771,7 @@ const clock = new THREE.Clock();
     }
   });
 
-  update();
+  if (typeof update !== 'undefined') update();
   renderer.render(scene, camera);
 })();
 
