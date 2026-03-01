@@ -481,7 +481,7 @@ function updateUI() {
   document.getElementById('sl-detail').textContent = detailLines.join('\n');
 
   // Button states
-  document.getElementById('btn-build').disabled    = p.credits < C.LAB_COST;
+  document.getElementById('btn-build').disabled    = p.credits < nextLabCost(p);
   document.getElementById('btn-jammer').disabled   = p.credits < C.JAMMER_COST;
   document.getElementById('btn-reactor').disabled  = p.credits < C.REACTOR_COST;
   document.getElementById('btn-silo').disabled     = p.credits < C.SILO_COST || !!p.silo;
@@ -576,7 +576,7 @@ let ctxTarget = { lat: 0, lon: 0, region: null };
 function openCtxMenu(px, py, lat, lon, region) {
   ctxTarget = { lat, lon, region };
   const p = state.player;
-  const canLab     = p.credits >= C.LAB_COST     && isOnLand(lat, lon);
+  const canLab     = p.credits >= nextLabCost(p)  && isOnLand(lat, lon);
   const canJam     = p.credits >= C.JAMMER_COST  && isOnLand(lat, lon);
   const canReactor = p.credits >= C.REACTOR_COST && isOnLand(lat, lon);
   const canSilo    = p.credits >= C.SILO_COST    && isOnLand(lat, lon) && !p.silo;
@@ -634,12 +634,13 @@ document.addEventListener('mousedown', e => {
 //  BUILD MODE
 // ═══════════════════════════════════════════════════════════════
 function enterBuildMode() {
-  if (state.player.credits < C.LAB_COST) { toast(`Need ${C.LAB_COST}c to build a lab`); return; }
+  const cost = nextLabCost(state.player);
+  if (state.player.credits < cost) { toast(`Need ${cost}c to build a lab`); return; }
   exitJammerMode(); exitReactorMode(); exitSiloMode();
   state.buildMode = true;
   state.pendingOp = null;
   clearOpBtns();
-  showTargetInd(`Click globe to place lab (${C.LAB_COST}c) — ESC to cancel`);
+  showTargetInd(`Click globe to place lab (${cost}c) — ESC to cancel`);
   document.getElementById('btn-build').classList.add('active');
 }
 
@@ -649,11 +650,16 @@ function exitBuildMode() {
   document.getElementById('btn-build').classList.remove('active');
 }
 
+function nextLabCost(player) {
+  return Math.round(C.LAB_COST * (1 + player.labs.length * 0.5));
+}
+
 function doBuildLab(lat, lon, region) {
   const p = state.player;
-  if (p.credits < C.LAB_COST) { toast('Not enough credits!'); return; }
+  const cost = nextLabCost(p);
+  if (p.credits < cost) { toast('Not enough credits!'); return; }
   if (!isOnLand(lat, lon)) { toast('Labs must be built on land!'); return; }
-  p.credits -= C.LAB_COST;
+  p.credits -= cost;
   const lab = new Lab(lat, lon, region, 'player');
   p.addLab(lab);
   createLabMarker(lab, true);
@@ -1072,7 +1078,7 @@ function aiTick() {
   const estPlayerSci = (ai.estimatedEnemySci.min + ai.estimatedEnemySci.max) / 2;
 
   // Build a lab if affordable and under cap
-  if (ai.credits >= C.LAB_COST + 80 && ai.labs.length < 8) {
+  if (ai.credits >= nextLabCost(ai) + 80 && ai.labs.length < 8) {
     aiBuild(); return;
   }
 
@@ -1124,7 +1130,7 @@ function aiTick() {
 
 function aiBuild() {
   const ai = state.ai;
-  if (ai.credits < C.LAB_COST) return;
+  if (ai.credits < nextLabCost(ai)) return;
   const keys = Object.keys(REGIONS);
   let region, lat, lon, attempts = 0;
   do {
@@ -1133,7 +1139,7 @@ function aiBuild() {
     attempts++;
   } while (!isOnLand(lat, lon) && attempts < 30);
   if (!isOnLand(lat, lon)) return;  // gave up — all sampled points were ocean
-  ai.credits -= C.LAB_COST;
+  ai.credits -= nextLabCost(ai);
   const lab = new Lab(lat, lon, region, 'ai');
   ai.addLab(lab);
   console.log(`[AI] Lab built in ${region.name} (${lat.toFixed(1)}, ${lon.toFixed(1)})`);
@@ -1562,7 +1568,7 @@ function init() {
 
   // Give AI an initial lab after a short delay
   setTimeout(() => { if (!state.gameOver) aiBuild(); }, 1500);
-  setTimeout(() => { if (!state.gameOver && state.ai.credits >= C.LAB_COST) aiBuild(); }, 6000);
+  setTimeout(() => { if (!state.gameOver && state.ai.credits >= nextLabCost(state.ai)) aiBuild(); }, 6000);
 
   log('War Room online. Build labs, reactors, and a rocket silo.', 'imp');
   log('100% science + 100% uranium + silo → assembly → ICBM launch → victory.', '');
