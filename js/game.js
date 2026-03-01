@@ -32,7 +32,7 @@ const NATION_CAPITALS = {
 const OPS = {
   RECON:    { cost: 300, duration: 45000,  success: 0.65 },
   STEAL:    { cost: 500, duration: 70000,  success: 0.45 },
-  SABOTAGE: { cost: 700, duration: 100000, success: 0.40 },
+  SABOTAGE: { cost: 700, duration: 30000,  success: 0.40 },
 };
 
 let _uid = 0;
@@ -1005,15 +1005,17 @@ function resolveOp(op, attacker, defender) {
       if (attacker === state.player) { log('SABOTAGE: No valid target in range', 'warn'); SFX.opFail(); }
 
     } else if (hit.kind === 'lab') {
-      hit.obj.disabledUntil = Date.now() + C.SABOTAGE_DUR;
+      const l = hit.obj;
+      if (l.marker) { MARKERS.remove(l.marker); l.marker = null; }
+      defender.labs = defender.labs.filter(x => x.id !== l.id);
+      defender.creditsPerSec = C.CREDITS_BASE + defender.labs.length * C.CREDITS_PER_LAB;
       if (attacker === state.player) {
         SFX.opSuccess();
-        log('SABOTAGE SUCCESS: Enemy lab disabled 2min!', 'ok'); toast('Enemy lab sabotaged!');
+        log('SABOTAGE SUCCESS: Enemy lab destroyed!', 'ok'); toast('Enemy lab destroyed!');
         if (defender.interruptAssembly()) { log('⚡ Enemy assembly INTERRUPTED!', 'ok'); toast('Enemy ASSEMBLY INTERRUPTED!'); }
       } else {
-        SFX.alert();
-        if (hit.obj.marker) setMarkerEnabled(hit.obj.marker, false);
-        log('⚠ Your lab was sabotaged! Offline 2min', 'danger'); toast('Your lab sabotaged — offline 2min!');
+        SFX.destroyed();
+        log('⚠ Your lab was destroyed!', 'danger'); toast('Your lab was destroyed!');
         if (defender.interruptAssembly()) { log('⚡ Your assembly was INTERRUPTED!', 'danger'); toast('YOUR ASSEMBLY INTERRUPTED!'); }
       }
 
