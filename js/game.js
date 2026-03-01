@@ -481,7 +481,9 @@ function updateUI() {
   document.getElementById('sl-detail').textContent = detailLines.join('\n');
 
   // Button states
-  document.getElementById('btn-build').disabled    = p.credits < nextLabCost(p);
+  const labCost = nextLabCost(p);
+  document.getElementById('btn-build').disabled    = p.credits < labCost;
+  document.getElementById('btn-build-cost').textContent = `${labCost}c — +0.04 sci/s`;
   document.getElementById('btn-jammer').disabled   = p.credits < C.JAMMER_COST;
   document.getElementById('btn-reactor').disabled  = p.credits < C.REACTOR_COST;
   document.getElementById('btn-silo').disabled     = p.credits < C.SILO_COST || !!p.silo;
