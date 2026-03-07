@@ -600,6 +600,15 @@ function updateUI() {
 // ═══════════════════════════════════════════════════════════════
 //  CLICK HANDLING
 // ═══════════════════════════════════════════════════════════════
+function toggleDefenseRadius(defense, isEnemy) {
+  if (defense.radiusRing) {
+    removeDefenseRadiusRing(defense.radiusRing);
+    defense.radiusRing = null;
+  } else {
+    defense.radiusRing = createDefenseRadiusRing(defense.lat, defense.lon, C.DEFENSE_RADIUS, isEnemy ? 0xff4444 : 0x44ffcc);
+  }
+}
+
 function handleClick(e) {
   const wasOpen = ctxEl.style.display === 'block';
   closeCtx();
@@ -607,6 +616,18 @@ function handleClick(e) {
   if (!hit) return;
   const { lat, lon } = hit;
   const region = getRegion(lat, lon);
+
+  // Click near a defense system → toggle its radius ring
+  if (!state.buildMode && !state.jammerMode && !state.reactorMode &&
+      !state.siloMode && !state.oilFieldMode && !state.defenseMode && !state.pendingOp) {
+    const clickV = ll2v3(lat, lon);
+    for (const d of (state.player?.defenses || [])) {
+      if (clickV.distanceTo(ll2v3(d.lat, d.lon)) < 0.09) { toggleDefenseRadius(d, false); return; }
+    }
+    for (const d of (state.player?.revealedEnemyDefenses || [])) {
+      if (clickV.distanceTo(ll2v3(d.lat, d.lon)) < 0.09) { toggleDefenseRadius(d, true); return; }
+    }
+  }
 
   if (state.siloMode)     { doBuildSilo(lat, lon, region);     exitSiloMode();     return; }
   if (state.reactorMode)  { doBuildReactor(lat, lon, region);  exitReactorMode();  return; }

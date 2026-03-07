@@ -401,6 +401,39 @@ function placeGroup(group, lat, lon) {
 }
 
 
+// Draw a radius circle on the sphere surface (chord-distance radius)
+function createDefenseRadiusRing(lat, lon, chordRadius, color) {
+  const center  = ll2v3(lat, lon, 1.0).normalize();
+  const angle   = 2 * Math.asin(Math.min(1, chordRadius / 2));
+  const right   = new THREE.Vector3().crossVectors(
+    center, Math.abs(center.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0)
+  ).normalize();
+  const fwd = new THREE.Vector3().crossVectors(right, center).normalize();
+  const pts = [];
+  for (let i = 0; i <= 128; i++) {
+    const t = (i / 128) * Math.PI * 2;
+    pts.push(
+      new THREE.Vector3()
+        .addScaledVector(center, Math.cos(angle))
+        .addScaledVector(right,  Math.sin(angle) * Math.cos(t))
+        .addScaledVector(fwd,    Math.sin(angle) * Math.sin(t))
+        .normalize().multiplyScalar(1.004)
+    );
+  }
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.75 })
+  );
+  G_GROUP.add(line);
+  return line;
+}
+
+function removeDefenseRadiusRing(ring) {
+  if (!ring) return;
+  G_GROUP.remove(ring);
+  ring.geometry.dispose();
+}
+
 // Set all child mesh colours — used for active/sabotaged state
 function setMarkerEnabled(marker, enabled) {
   if (!marker) return;
