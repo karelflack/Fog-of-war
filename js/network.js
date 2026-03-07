@@ -1,22 +1,12 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════
-//  MULTIPLAYER
-//  Signalling: free HiveMQ public MQTT broker (no account needed)
-//  Game data:  WebRTC data channel (peer-to-peer)
+//  MULTIPLAYER  —  pure MQTT relay, no WebRTC
+//  All traffic goes through the free HiveMQ public broker.
+//  No NAT issues, no P2P, no second service.
 // ═══════════════════════════════════════════════════════════════
 
-const MQTT_URL    = 'wss://broker.hivemq.com:8884/mqtt';
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'turn:openrelay.metered.ca:80',
-    username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject', credential: 'openrelayproject' },
-];
+const MQTT_URL = 'wss://broker.hivemq.com:8884/mqtt';
 
 function genRoomCode() {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -32,86 +22,48 @@ function mpStatus(msg) {
   el.style.display = msg ? 'block' : 'none';
 }
 
-function waitIce(pc, ms = 6000) {
-  if (pc.iceGatheringState === 'complete') return Promise.resolve();
-  return new Promise(resolve => {
-    const done = () => { pc.onicegatheringstatechange = null; resolve(); };
-    pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') done(); };
-    setTimeout(done, ms);
-  });
-}
-
 const MP = {
   active:   false,
   isHost:   false,
-  pc:       null,
-  conn:     null,
-  mqttClient: null,
+  client:   null,
+  code:     null,
+  txTopic:  null,   // topic we publish on
+  rxTopic:  null,   // topic we subscribe to
   remoteNation:        null,
   remoteNationBonuses: { RECON: 0, STEAL: 0, SABOTAGE: 0 },
   pendingOps: {},
 
   send(type, data) {
-    if (this.conn?.readyState === 'open') this.conn.send(JSON.stringify({ type, data }));
+    if (this.client?.connected) {
+      this.client.publish(this.txTopic, JSON.stringify({ type, data }), { qos: 1 });
+    }
   },
 
-  _mqttConnect() {
+  _connect(onMsg) {
     return new Promise((resolve, reject) => {
       const id = 'fog_' + Math.random().toString(36).slice(2, 10);
       const client = mqtt.connect(MQTT_URL, { clientId: id, clean: true });
-      const t = setTimeout(() => reject(new Error('Relay timeout — check your connection')), 10000);
+      const t = setTimeout(() => reject(new Error('Relay timeout — check your internet')), 10000);
       client.on('connect', () => { clearTimeout(t); resolve(client); });
       client.on('error',   err => { clearTimeout(t); reject(err); });
+      client.on('message', (topic, msg) => {
+        try { onMsg(JSON.parse(msg.toString())); } catch { /* ignore malformed */ }
+      });
     });
   },
 
-  _setupChannel(dc) {
-    this.conn = dc;
-    dc.onopen = () => {
-      // signalling done — disconnect MQTT
-      if (this.mqttClient) { this.mqttClient.end(true); this.mqttClient = null; }
-      if (this.isHost) {
-        mpStatus('Opponent connected! Pick your nation.');
-        showNationSelect();
-      } else {
-        mpStatus('Connected! Waiting for host to pick a nation…');
-      }
-    };
-    dc.onmessage = e => handleNetMsg(e.data);
-    dc.onclose   = () => {
-      if (!state.gameOver) { log('⚠ Opponent disconnected!', 'danger'); toast('Opponent disconnected!'); }
-    };
-    dc.onerror = err => log(`Net error: ${err}`, 'warn');
-  },
-
   async host() {
-    this.isHost = true;
+    this.isHost  = true;
+    this.code    = genRoomCode();
+    this.txTopic = `fogofwar3/${this.code}/host`;
+    this.rxTopic = `fogofwar3/${this.code}/guest`;
     mpStatus('Connecting to relay…');
     try {
-      const client = await this._mqttConnect();
-      this.mqttClient = client;
-
-      const code = genRoomCode();
-      const topicOffer  = `fogofwar2/${code}/offer`;
-      const topicAnswer = `fogofwar2/${code}/answer`;
-
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      this.pc  = pc;
-      this._setupChannel(pc.createDataChannel('game', { ordered: true }));
-
-      await pc.setLocalDescription(await pc.createOffer());
-      mpStatus('Setting up… (~5 seconds)');
-      await waitIce(pc);
-
-      // Publish offer with retain so guest gets it even if they connect late
-      client.publish(topicOffer, JSON.stringify(pc.localDescription), { qos: 1, retain: true });
-      client.subscribe(topicAnswer, { qos: 1 });
-      client.on('message', async (topic, msg) => {
-        if (topic !== topicAnswer) return;
-        try { await pc.setRemoteDescription(JSON.parse(msg.toString())); } catch { /* ignore duplicates */ }
-      });
-
-      document.getElementById('mp-room-code').textContent = code;
+      this.client = await this._connect(msg => handleNetMsg(msg));
+      this.client.subscribe(this.rxTopic, { qos: 1 });
+      // Announce room so guest knows host is ready
+      this.client.publish(`fogofwar3/${this.code}/ready`, '1', { qos: 1, retain: true });
+      document.getElementById('mp-room-code').textContent = this.code;
       document.getElementById('mp-code-display').style.display = 'block';
       mpStatus('Waiting for opponent to connect…');
     } catch (e) {
@@ -120,35 +72,30 @@ const MP = {
   },
 
   async join(code) {
-    this.isHost = false;
+    this.isHost  = false;
+    this.code    = code;
+    this.txTopic = `fogofwar3/${code}/guest`;
+    this.rxTopic = `fogofwar3/${code}/host`;
     mpStatus('Connecting to relay…');
     try {
-      const client = await this._mqttConnect();
-      this.mqttClient = client;
-
-      const topicOffer  = `fogofwar2/${code}/offer`;
-      const topicAnswer = `fogofwar2/${code}/answer`;
-
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-      this.pc  = pc;
-      pc.ondatachannel = e => this._setupChannel(e.channel);
-
-      mpStatus('Waiting for host offer…');
-      client.subscribe(topicOffer, { qos: 1 });
-      client.on('message', async (topic, msg) => {
-        if (topic !== topicOffer) return;
-        client.unsubscribe(topicOffer);
-        try {
-          await pc.setRemoteDescription(JSON.parse(msg.toString()));
-          await pc.setLocalDescription(await pc.createAnswer());
-          mpStatus('Almost there… (~5 seconds)');
-          await waitIce(pc);
-          client.publish(topicAnswer, JSON.stringify(pc.localDescription), { qos: 1, retain: true });
-          mpStatus('Answer sent! Waiting for host…');
-        } catch (e) {
-          mpStatus(`Error: ${e.message}`);
-        }
+      this.client = await this._connect(msg => handleNetMsg(msg));
+      // Check room exists
+      mpStatus('Looking for host…');
+      await new Promise((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('Room not found — check the code')), 8000);
+        this.client.subscribe(`fogofwar3/${code}/ready`, { qos: 1 });
+        this.client.once('message', (topic) => {
+          if (topic === `fogofwar3/${code}/ready`) {
+            clearTimeout(t);
+            this.client.unsubscribe(`fogofwar3/${code}/ready`);
+            resolve();
+          }
+        });
       });
+      this.client.subscribe(this.rxTopic, { qos: 1 });
+      // Tell host guest has arrived
+      this.send('GUEST_JOINED', {});
+      mpStatus('Connected! Waiting for host to pick a nation…');
     } catch (e) {
       mpStatus(`Error: ${e.message}`);
     }
@@ -175,12 +122,17 @@ setInterval(() => {
 }, 12000);
 
 // ── Incoming message router ────────────────────────────────────
-function handleNetMsg(raw) {
-  let msg;
-  try { msg = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return; }
+function handleNetMsg(msg) {
   const { type, data } = msg;
 
   switch (type) {
+
+    case 'GUEST_JOINED': {
+      // Host sees guest arrive — prompt nation select
+      mpStatus('Opponent connected! Pick your nation.');
+      showNationSelect();
+      break;
+    }
 
     case 'GAME_START': {
       const hostNation  = data.nation;
