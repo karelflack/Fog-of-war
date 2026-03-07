@@ -567,7 +567,7 @@ function updateUI() {
     let txt = '';
     if (intel.length) {
       txt += `${intel.length} lab(s) located:\n` +
-        intel.map(r => `• ${r.lab.region ? r.lab.region.name : '?'} (${r.lab.lat.toFixed(0)}°, ${r.lab.lon.toFixed(0)}°)`).join('\n');
+        intel.map(r => `• ${r.lab.region ? r.lab.region.name : '?'} (${r.lab.lat.toFixed(0)}°, ${r.lab.lon.toFixed(0)}°) ← STEAL science / SABOTAGE`).join('\n');
     }
     if (jammerIntel.length) {
       if (txt) txt += '\n';
@@ -577,7 +577,7 @@ function updateUI() {
     if (reactorIntel.length) {
       if (txt) txt += '\n';
       txt += `${reactorIntel.length} reactor(s) located:\n` +
-        reactorIntel.map(r => `• ${r.region ? r.region.name : '?'} (${r.lat.toFixed(0)}°, ${r.lon.toFixed(0)}°) ← SABOTAGE`).join('\n');
+        reactorIntel.map(r => `• ${r.region ? r.region.name : '?'} (${r.lat.toFixed(0)}°, ${r.lon.toFixed(0)}°) ← STEAL uranium / SABOTAGE`).join('\n');
     }
     if (siloIntel) {
       if (txt) txt += '\n';
@@ -1145,19 +1145,29 @@ function resolveOp(op, attacker, defender) {
 
   // ── STEAL ──────────────────────────────────────
   else if (op.type === 'STEAL') {
-    // Check for a nearby enemy oil field (revealed for player; AI can target any)
     const targetV = ll2v3(op.lat, op.lon);
-    const availableFields = attacker === state.player
+    const isPlayer = attacker === state.player;
+
+    // Build lists of stealable targets (player needs RECON first; AI targets anything)
+    const availableOilFields = isPlayer
       ? defender.oilFields.filter(of_ => attacker.revealedEnemyOilFields.some(x => x.id === of_.id))
       : defender.oilFields;
-    const nearField = availableFields.find(of_ => targetV.distanceTo(ll2v3(of_.lat, of_.lon)) < 0.55);
+    const availableReactors = isPlayer
+      ? defender.reactors.filter(r => attacker.revealedEnemyReactors.some(x => x.id === r.id))
+      : defender.reactors;
+    const availableLabs = isPlayer
+      ? defender.labs.filter(l => attacker.revealedEnemyLabs.some(x => x.lab.id === l.id) && l.isActive())
+      : defender.labs.filter(l => l.isActive());
 
-    if (nearField) {
-      // Credit heist — drain the oil field
+    const nearOilField = availableOilFields.find(of_ => targetV.distanceTo(ll2v3(of_.lat, of_.lon)) < 0.55);
+    const nearReactor  = availableReactors.find(r  => targetV.distanceTo(ll2v3(r.lat,   r.lon))   < 0.55);
+    const nearLab      = availableLabs.find(l      => targetV.distanceTo(ll2v3(l.lat,   l.lon))   < 0.55);
+
+    if (nearOilField) {
       const stolen = 250, gained = 175;
       defender.credits = Math.max(0, defender.credits - stolen);
       attacker.credits += gained;
-      if (attacker === state.player) {
+      if (isPlayer) {
         SFX.opSuccess();
         log(`STEAL SUCCESS: +${gained}c siphoned from enemy oil field!`, 'ok');
         toast(`+${gained}c drained from enemy oil field!`);
@@ -1166,12 +1176,39 @@ function resolveOp(op, attacker, defender) {
         log(`⚠ Enemy drained your oil field! −${stolen}c`, 'danger');
         toast(`Enemy stole ${stolen}c from your oil field!`);
       }
+    } else if (nearReactor) {
+      const stolen = 18, gained = 12;
+      defender.depletedUranium = Math.max(0, defender.depletedUranium - stolen);
+      attacker.depletedUranium = Math.min(100, attacker.depletedUranium + gained);
+      if (isPlayer) {
+        SFX.opSuccess();
+        log(`STEAL SUCCESS: +${gained}% uranium siphoned from enemy reactor!`, 'ok');
+        toast(`+${gained}% uranium stolen!`);
+      } else {
+        SFX.alert();
+        log(`⚠ Enemy stole your uranium! −${stolen}%`, 'danger');
+        toast(`Enemy stole your uranium! −${stolen}%`);
+      }
+    } else if (nearLab) {
+      const stolen = 6, gained = 10;
+      defender.science = Math.max(0,   defender.science - stolen);
+      attacker.science = Math.min(100, attacker.science + gained);
+      if (isPlayer) {
+        SFX.opSuccess();
+        log(`STEAL SUCCESS: +${gained}% science stolen from enemy lab!`, 'ok');
+        toast(`+${gained}% science stolen from lab!`);
+        bumpdEstimate(attacker, defender, 10);
+      } else {
+        SFX.alert();
+        log(`⚠ Enemy stole research from your lab! −${stolen}%`, 'danger');
+        toast(`Enemy stole your research! −${stolen}%`);
+      }
     } else {
-      // Fallback — steal science
+      // Fallback — generic science steal
       const gain = 8, loss = 4;
       attacker.science = Math.min(100, attacker.science + gain);
       defender.science = Math.max(0,   defender.science - loss);
-      if (attacker === state.player) {
+      if (isPlayer) {
         SFX.opSuccess();
         log(`STEAL SUCCESS: +${gain}% science!`, 'ok');
         toast(`+${gain}% science stolen!`);
@@ -1555,19 +1592,27 @@ function aiOp(type) {
 
   let lat, lon, region;
 
-  // STEAL priority: target player oil fields (AI intelligence network)
-  if (type === 'STEAL' && p.oilFields.length > 0 && Math.random() < 0.60) {
-    const target = p.oilFields[Math.floor(Math.random() * p.oilFields.length)];
-    lat = target.lat; lon = target.lon; region = target.region;
-    // AI marks it as "known" for STEAL resolution
-    if (!ai.revealedEnemyOilFields.some(x => x.id === target.id)) {
-      ai.revealedEnemyOilFields.push(target);
+  // STEAL priority: oil fields > reactors > labs
+  if (type === 'STEAL') {
+    let stealTarget = null;
+    if (p.oilFields.length > 0 && Math.random() < 0.60) {
+      stealTarget = p.oilFields[Math.floor(Math.random() * p.oilFields.length)];
+      if (!ai.revealedEnemyOilFields.some(x => x.id === stealTarget.id)) ai.revealedEnemyOilFields.push(stealTarget);
+    } else if (p.reactors.length > 0 && Math.random() < 0.55) {
+      stealTarget = p.reactors[Math.floor(Math.random() * p.reactors.length)];
+      if (!ai.revealedEnemyReactors.some(x => x.id === stealTarget.id)) ai.revealedEnemyReactors.push(stealTarget);
+    } else if (p.labs.length > 0) {
+      stealTarget = p.labs[Math.floor(Math.random() * p.labs.length)];
+      if (!ai.revealedEnemyLabs.some(x => x.lab.id === stealTarget.id)) ai.revealedEnemyLabs.push({ lab: stealTarget });
     }
-    const op = new Operation(type, lat, lon, region);
-    ai.ops.push(op);
-    console.log(`[AI] ${type} → oil field in ${region ? region.name : '?'}`);
-    setTimeout(() => resolveOp(op, state.ai, state.player), OPS[type].duration);
-    return;
+    if (stealTarget) {
+      lat = stealTarget.lat; lon = stealTarget.lon; region = stealTarget.region;
+      const op = new Operation(type, lat, lon, region);
+      ai.ops.push(op);
+      console.log(`[AI] STEAL → ${region ? region.name : '?'}`);
+      setTimeout(() => resolveOp(op, state.ai, state.player), OPS[type].duration);
+      return;
+    }
   }
 
   // SABOTAGE priority: revealed silo > revealed reactors > revealed defenses > revealed jammers > labs
