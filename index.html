@@ -45,6 +45,7 @@
         <li><b>Rocket Silo (1200c)</b> — Required to launch. Only one can be built. A prime sabotage target — hide it or protect it with jammers.</li>
         <li><b>Oil Field (600c)</b> — Generates +4c/s passive income. Makes you a STEAL target — protect with jammers. Locate and drain enemy oil fields using RECON then STEAL.</li>
         <li><b>Jammer (600c)</b> — Dual-purpose: near your labs it penalises enemy operations (−28% success). Near enemy labs it slows their science by 50%. Enemy jammers are hidden until swept or reconed.</li>
+        <li><b>Defense System (800c)</b> — Creates a no-build zone: the enemy cannot construct anything within its radius (~1750 km). Hidden from the enemy until found by RECON or SWEEP. SABOTAGE it to clear the zone. Max 3 per player.</li>
       </ul>
     </div>
 
@@ -268,6 +269,9 @@
   <button class="btn" id="btn-silo" onclick="G.enterSiloMode()">
     Build Silo<br><span class="cost-tag">1200c — required to launch</span>
   </button>
+  <button class="btn" id="btn-defense" onclick="G.enterDefenseMode()">
+    Build Defense System<br><span class="cost-tag">800c — denies enemy construction</span>
+  </button>
   <div class="sec-info" id="sl-labs">Labs: 0 · Jammers: 0</div>
   <div class="sec-info" id="sl-detail" style="margin-top:4px"></div>
 
@@ -346,7 +350,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/globe.js"></script>
 <script src="js/network.js"></script>

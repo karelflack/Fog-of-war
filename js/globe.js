@@ -539,6 +539,52 @@ function createJammerMarker(jammer, isPlayer) {
   return g;
 }
 
+// ── Defense System: ABM radar + interceptor battery ───────────
+function createDefenseMarker(defense, isPlayer) {
+  const CB  = isPlayer ? 0x0a2a3a : 0x3a0a0a;   // base pad
+  const CM  = isPlayer ? 0x1a5a7a : 0x7a1a1a;   // structure
+  const CR  = isPlayer ? 0x22aadd : 0xdd2222;   // radar dish / emissive
+  const CL  = isPlayer ? 0x44ddff : 0xff4444;   // beacon
+
+  const g = new THREE.Group();
+
+  // Concrete base
+  const base = mkPart(new THREE.CylinderGeometry(0.022, 0.024, 0.004, 10), CB);
+  base.position.set(0, 0.002, 0);
+
+  // Central pedestal
+  const ped = mkPart(new THREE.CylinderGeometry(0.007, 0.009, 0.018, 8), CM);
+  ped.position.set(0, 0.013, 0);
+
+  // Radar dish (flat hemisphere facing up)
+  const dish = mkPart(new THREE.SphereGeometry(0.016, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), CR, CR);
+  dish.rotation.x = Math.PI;   // open face up
+  dish.position.set(0, 0.024, 0);
+
+  // Two interceptor missile tubes on either side
+  const tube1 = mkPart(new THREE.CylinderGeometry(0.004, 0.004, 0.030, 6), CM);
+  tube1.position.set(0.018, 0.019, 0);
+
+  const tube2 = mkPart(new THREE.CylinderGeometry(0.004, 0.004, 0.030, 6), CM);
+  tube2.position.set(-0.018, 0.019, 0);
+
+  // Interceptor tips (emissive warheads)
+  const tip1 = mkPart(new THREE.ConeGeometry(0.004, 0.010, 6), CL, CL);
+  tip1.position.set(0.018, 0.039, 0);
+  tip1.userData.isBeacon = true;
+
+  const tip2 = mkPart(new THREE.ConeGeometry(0.004, 0.010, 6), CL, CL);
+  tip2.position.set(-0.018, 0.039, 0);
+  tip2.userData.isBeacon = true;
+
+  g.add(base, ped, dish, tube1, tube2, tip1, tip2);
+  placeGroup(g, defense.lat, defense.lon);
+  g.userData.defenseId = defense.id;
+  MARKERS.add(g);
+  defense.marker = g;
+  return g;
+}
+
 // ── Silo: underground launch facility + emerging missile ──────
 function createSiloMarker(silo, isPlayer) {
   const CR  = isPlayer ? 0x1a3a7a : 0x7a1a1a;   // outer rim
