@@ -6,7 +6,10 @@
 //  No NAT issues, no P2P, no second service.
 // ═══════════════════════════════════════════════════════════════
 
-const MQTT_URL = 'wss://broker.hivemq.com:8884/mqtt';
+const MQTT_BROKERS = [
+  'wss://broker.hivemq.com:8884/mqtt',
+  'wss://mqtt.eclipseprojects.io:443/mqtt',
+];
 
 function genRoomCode() {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -39,16 +42,27 @@ const MP = {
     }
   },
 
-  _connect(onMsg) {
+  _tryBroker(url) {
     return new Promise((resolve, reject) => {
       const id = 'fog_' + Math.random().toString(36).slice(2, 10);
-      const client = mqtt.connect(MQTT_URL, { clientId: id, clean: true });
-      const t = setTimeout(() => reject(new Error('Relay timeout — check your internet')), 10000);
+      const client = mqtt.connect(url, { clientId: id, clean: true, connectTimeout: 6000 });
+      const t = setTimeout(() => { client.end(true); reject(new Error('timeout')); }, 7000);
       client.on('connect', () => { clearTimeout(t); resolve(client); });
-      client.on('error',   err => { clearTimeout(t); reject(err); });
-      client.on('message', (topic, msg) => {
-        try { onMsg(JSON.parse(msg.toString())); } catch { /* ignore malformed */ }
-      });
+      client.on('error',   ()  => { clearTimeout(t); client.end(true); reject(new Error('error')); });
+    });
+  },
+
+  async _connect(onMsg) {
+    if (typeof mqtt === 'undefined') throw new Error('mqtt library failed to load — try refreshing');
+    let client = null;
+    for (const url of MQTT_BROKERS) {
+      try { client = await this._tryBroker(url); break; } catch { /* try next */ }
+    }
+    if (!client) throw new Error('Could not reach relay — check your internet connection');
+    client.on('message', (topic, msg) => {
+      try { onMsg(JSON.parse(msg.toString())); } catch { /* ignore malformed */ }
+    });
+    return client;
     });
   },
 
