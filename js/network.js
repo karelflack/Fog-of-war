@@ -63,7 +63,6 @@ const MP = {
       try { onMsg(JSON.parse(msg.toString())); } catch { /* ignore malformed */ }
     });
     return client;
-    });
   },
 
   async host() {

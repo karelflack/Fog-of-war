@@ -1015,15 +1015,8 @@ function doLaunchOp(type, lat, lon, region) {
     // Multiplayer: send to opponent (defender) to resolve, then receive OP_RESULT
     MP.pendingOps[op.id] = op;
     setTimeout(() => {
-      if (op.done) return;  // already resolved (shouldn't happen, but guard)
-      if (MP.conn?.open) {
-        MP.send('LAUNCH_OP', { opId: op.id, type, lat, lon, regionId: region?.id || null });
-      } else {
-        // Disconnected — clear op ring
-        op.done = true;
-        if (op.ring) { RINGS.remove(op.ring); op.ring = null; }
-        log(`${type} aborted — opponent disconnected`, 'warn');
-      }
+      if (op.done) return;
+      MP.send('LAUNCH_OP', { opId: op.id, type, lat, lon, regionId: region?.id || null });
     }, OPS[type].duration);
   } else {
     setTimeout(() => resolveOp(op, state.player, state.ai), OPS[type].duration);
