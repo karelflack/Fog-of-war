@@ -599,6 +599,7 @@ function updateUI() {
 //  CLICK HANDLING
 // ═══════════════════════════════════════════════════════════════
 function handleClick(e) {
+  const wasOpen = ctxEl.style.display === 'block';
   closeCtx();
   const hit = raycastSphere(e.clientX, e.clientY);
   if (!hit) return;
@@ -625,6 +626,7 @@ function handleClick(e) {
     return;
   }
 
+  if (wasOpen) return;
   openCtxMenu(e.clientX, e.clientY, lat, lon, region);
 }
 
