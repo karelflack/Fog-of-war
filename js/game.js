@@ -530,7 +530,9 @@ function updateUI() {
   document.getElementById('btn-jammer').disabled   = p.credits < C.JAMMER_COST;
   document.getElementById('btn-reactor').disabled  = p.credits < C.REACTOR_COST;
   document.getElementById('btn-silo').disabled     = p.credits < C.SILO_COST || !!p.silo;
-  document.getElementById('btn-oilfield').disabled = p.credits < C.OILFIELD_COST;
+  const oilCost = nextOilFieldCost(p);
+  document.getElementById('btn-oilfield').disabled = p.credits < oilCost;
+  document.getElementById('btn-oilfield-cost').textContent = `${oilCost}c — +${C.CREDITS_PER_OILFIELD}c/s · STEAL target`;
   document.getElementById('btn-defense').disabled  = p.credits < C.DEFENSE_COST || p.defenses.length >= C.DEFENSE_MAX;
   document.getElementById('btn-recon').disabled    = p.credits < OPS.RECON.cost;
   document.getElementById('btn-steal').disabled    = p.credits < OPS.STEAL.cost;
@@ -643,7 +645,7 @@ function openCtxMenu(px, py, lat, lon, region) {
   const canJam      = p.credits >= C.JAMMER_COST   && isOnLand(lat, lon);
   const canReactor  = p.credits >= C.REACTOR_COST  && isOnLand(lat, lon);
   const canSilo     = p.credits >= C.SILO_COST     && isOnLand(lat, lon) && !p.silo;
-  const canOilField = p.credits >= C.OILFIELD_COST && isOnLand(lat, lon);
+  const canOilField = p.credits >= nextOilFieldCost(p) && isOnLand(lat, lon);
   const canDefense  = p.credits >= C.DEFENSE_COST  && isOnLand(lat, lon) && p.defenses.length < C.DEFENSE_MAX;
   const canR    = p.credits >= OPS.RECON.cost;
   const canSt   = p.credits >= OPS.STEAL.cost;
@@ -665,7 +667,7 @@ function openCtxMenu(px, py, lat, lon, region) {
       Build Silo <span class="ctx-c">${C.SILO_COST}c</span>
     </div>
     <div class="ctx-row ${canOilField ? '' : 'off'}" id="ctx-oilfield">
-      Build Oil Field <span class="ctx-c">${C.OILFIELD_COST}c</span>
+      Build Oil Field <span class="ctx-c">${nextOilFieldCost(p)}c</span>
     </div>
     <div class="ctx-row ${canDefense ? '' : 'off'}" id="ctx-defense">
       Build Defense System <span class="ctx-c">${C.DEFENSE_COST}c</span>
@@ -725,6 +727,10 @@ function exitBuildMode() {
 
 function nextLabCost(player) {
   return Math.round(C.LAB_COST * (1 + player.labs.length * 0.5));
+}
+
+function nextOilFieldCost(player) {
+  return Math.round(C.OILFIELD_COST * (1 + player.oilFields.length * 0.6));
 }
 
 // Returns true if an enemy defense system covers this location (blocks construction)
@@ -862,12 +868,13 @@ function doBuildSilo(lat, lon, region) {
 //  OIL FIELD PLACEMENT
 // ═══════════════════════════════════════════════════════════════
 function enterOilFieldMode() {
-  if (state.player.credits < C.OILFIELD_COST) { toast(`Need ${C.OILFIELD_COST}c to build oil field`); return; }
+  const cost = nextOilFieldCost(state.player);
+  if (state.player.credits < cost) { toast(`Need ${cost}c to build oil field`); return; }
   exitBuildMode(); exitJammerMode(); exitReactorMode(); exitSiloMode(); exitDefenseMode();
   state.oilFieldMode = true;
   state.pendingOp = null;
   clearOpBtns();
-  showTargetInd(`Click globe to build oil field (${C.OILFIELD_COST}c) — ESC to cancel`);
+  showTargetInd(`Click globe to build oil field (${cost}c) — ESC to cancel`);
   document.getElementById('btn-oilfield').classList.add('active');
 }
 
@@ -879,10 +886,11 @@ function exitOilFieldMode() {
 
 function doBuildOilField(lat, lon, region) {
   const p = state.player;
-  if (p.credits < C.OILFIELD_COST) { toast('Not enough credits!'); return; }
+  const cost = nextOilFieldCost(p);
+  if (p.credits < cost) { toast('Not enough credits!'); return; }
   if (!isOnLand(lat, lon)) { toast('Oil fields must be on land!'); return; }
   if (isBlockedByEnemyDefense(lat, lon, state.ai)) { toast('Enemy defense system active in this area! RECON to locate it.'); return; }
-  p.credits -= C.OILFIELD_COST;
+  p.credits -= cost;
   const of_ = new OilField(lat, lon, region, 'player');
   p.addOilField(of_);
   createOilFieldMarker(of_, true);
