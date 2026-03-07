@@ -896,6 +896,7 @@ function doBuildOilField(lat, lon, region) {
   createOilFieldMarker(of_, true);
   log(`Oil field built in ${region ? region.name : 'unknown'} (+${C.CREDITS_PER_OILFIELD}c/s)`, 'ok');
   toast(`Oil field online! +${C.CREDITS_PER_OILFIELD}c/s`);
+  if (MP.active) MP.send('BUILD_OIL_FIELD', { id: of_.id, lat, lon, regionId: region?.id || null });
   updateUI();
 }
 
@@ -931,6 +932,7 @@ function doBuildDefense(lat, lon, region) {
   createDefenseMarker(defense, true);
   log(`Defense system online in ${region ? region.name : 'unknown'} — ${C.DEFENSE_RADIUS.toFixed(2)} radius denial zone`, 'ok');
   toast('Defense system active! Enemy cannot build within its radius.');
+  if (MP.active) MP.send('BUILD_DEFENSE', { id: defense.id, lat, lon, regionId: region?.id || null });
   updateUI();
 }
 

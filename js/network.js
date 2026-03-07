@@ -190,6 +190,18 @@ function handleNetMsg(msg) {
       s.id = data.id; state.ai.silo = s;
       break;
     }
+    case 'BUILD_OIL_FIELD': {
+      if (!state.ai) break;
+      const of_ = new OilField(data.lat, data.lon, REGIONS[data.regionId] || null, 'ai');
+      of_.id = data.id; state.ai.addOilField(of_);
+      break;
+    }
+    case 'BUILD_DEFENSE': {
+      if (!state.ai) break;
+      const def = new Defense(data.lat, data.lon, REGIONS[data.regionId] || null, 'ai');
+      def.id = data.id; state.ai.defenses.push(def);
+      break;
+    }
 
     case 'LAUNCH_OP':     resolveRemoteOp(data); break;
     case 'OP_RESULT':     applyOpResult(data);   break;
@@ -239,16 +251,36 @@ function resolveRemoteOp(data) {
       .map(j => ({ id: j.id, lat: j.lat, lon: j.lon }));
     result.revealedReactors = defender.reactors.filter(r => origin.distanceTo(ll2v3(r.lat, r.lon)) <= C.RECON_RADIUS)
       .map(r => ({ id: r.id, lat: r.lat, lon: r.lon }));
-    result.revealedDefenses = defender.defenses.filter(d => origin.distanceTo(ll2v3(d.lat, d.lon)) <= C.RECON_RADIUS)
+    result.revealedDefenses  = defender.defenses.filter(d => origin.distanceTo(ll2v3(d.lat, d.lon)) <= C.RECON_RADIUS)
       .map(d => ({ id: d.id, lat: d.lat, lon: d.lon }));
+    result.revealedOilFields = defender.oilFields.filter(o => origin.distanceTo(ll2v3(o.lat, o.lon)) <= C.RECON_RADIUS)
+      .map(o => ({ id: o.id, lat: o.lat, lon: o.lon, regionId: o.region?.id || null }));
     result.revealedSilo = (defender.silo && origin.distanceTo(ll2v3(defender.silo.lat, defender.silo.lon)) <= C.RECON_RADIUS)
       ? { id: defender.silo.id, lat: defender.silo.lat, lon: defender.silo.lon } : null;
     spawnSearchPulse(lat, lon);
 
   } else if (type === 'STEAL') {
-    defender.science = Math.max(0, defender.science - 4);
-    result.sciGained = 8;
-    SFX.alert(); log('⚠ Enemy stole your science! −4%', 'danger'); toast('Enemy stole your science! −4%');
+    const tv = ll2v3(lat, lon);
+    const nearOilField = defender.oilFields.find(o => tv.distanceTo(ll2v3(o.lat, o.lon)) < 0.55);
+    const nearReactor  = defender.reactors.find(r  => tv.distanceTo(ll2v3(r.lat,  r.lon))  < 0.55);
+    const nearLab      = defender.labs.find(l      => tv.distanceTo(ll2v3(l.lat,  l.lon))  < 0.55 && l.isActive());
+    if (nearOilField) {
+      defender.credits = Math.max(0, defender.credits - 250);
+      result.stealKind = 'oilField'; result.creditsGained = 175;
+      SFX.alert(); log('⚠ Enemy drained your oil field! −250c', 'danger'); toast('Enemy stole 250c from your oil field!');
+    } else if (nearReactor) {
+      defender.depletedUranium = Math.max(0, defender.depletedUranium - 18);
+      result.stealKind = 'reactor'; result.uraniumGained = 12;
+      SFX.alert(); log('⚠ Enemy stole your uranium! −18%', 'danger'); toast('Enemy stole your uranium! −18%');
+    } else if (nearLab) {
+      defender.science = Math.max(0, defender.science - 6);
+      result.stealKind = 'lab'; result.sciGained = 10;
+      SFX.alert(); log('⚠ Enemy stole research from your lab! −6%', 'danger'); toast('Enemy stole your research! −6%');
+    } else {
+      defender.science = Math.max(0, defender.science - 4);
+      result.stealKind = 'science'; result.sciGained = 8;
+      SFX.alert(); log('⚠ Enemy stole your science! −4%', 'danger'); toast('Enemy stole your science! −4%');
+    }
 
   } else if (type === 'SABOTAGE') {
     const t3 = ll2v3(lat, lon);
@@ -345,6 +377,14 @@ function applyOpResult(data) {
         state.player.revealedEnemyDefenses.push(d); createDefenseMarker(d, false); found++;
       }
     }
+    for (const od of data.revealedOilFields || []) {
+      let o = state.ai.oilFields.find(x => x.id === od.id);
+      if (!o) { o = new OilField(od.lat, od.lon, REGIONS[od.regionId] || null, 'ai'); o.id = od.id; state.ai.addOilField(o); }
+      if (!state.player.revealedEnemyOilFields.some(x => x.id === o.id)) {
+        state.player.revealedEnemyOilFields.push(o); createOilFieldMarker(o, false);
+        log('RECON: Enemy oil field located! Use STEAL to drain it!', 'ok'); found++;
+      }
+    }
     if (data.revealedSilo && !state.player.revealedEnemySilo) {
       let s = state.ai.silo;
       if (!s || s.id !== data.revealedSilo.id) {
@@ -359,8 +399,17 @@ function applyOpResult(data) {
     else log('RECON: Nothing new found in that area.', 'imp');
 
   } else if (opType === 'STEAL') {
-    state.player.science = Math.min(100, state.player.science + (data.sciGained || 0));
-    SFX.opSuccess(); log(`STEAL SUCCESS: +${data.sciGained}% science!`, 'ok'); toast(`+${data.sciGained}% science stolen!`);
+    SFX.opSuccess();
+    if (data.stealKind === 'oilField') {
+      state.player.credits += data.creditsGained || 0;
+      log(`STEAL SUCCESS: +${data.creditsGained}c from enemy oil field!`, 'ok'); toast(`+${data.creditsGained}c drained!`);
+    } else if (data.stealKind === 'reactor') {
+      state.player.depletedUranium = Math.min(100, state.player.depletedUranium + (data.uraniumGained || 0));
+      log(`STEAL SUCCESS: +${data.uraniumGained}% uranium from enemy reactor!`, 'ok'); toast(`+${data.uraniumGained}% uranium stolen!`);
+    } else {
+      state.player.science = Math.min(100, state.player.science + (data.sciGained || 0));
+      log(`STEAL SUCCESS: +${data.sciGained}% science!`, 'ok'); toast(`+${data.sciGained}% science stolen!`);
+    }
 
   } else if (opType === 'SABOTAGE') {
     if (!data.hit) { log('SABOTAGE: No valid target in range.', 'warn'); SFX.opFail(); return; }
