@@ -8,6 +8,8 @@
 
 const MQTT_BROKERS = [
   'wss://broker.hivemq.com:8884/mqtt',
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt',
   'wss://mqtt.eclipseprojects.io:443/mqtt',
 ];
 
@@ -45,8 +47,8 @@ const MP = {
   _tryBroker(url) {
     return new Promise((resolve, reject) => {
       const id = 'fog_' + Math.random().toString(36).slice(2, 10);
-      const client = mqtt.connect(url, { clientId: id, clean: true, connectTimeout: 6000 });
-      const t = setTimeout(() => { client.end(true); reject(new Error('timeout')); }, 7000);
+      const client = mqtt.connect(url, { clientId: id, clean: true, connectTimeout: 8000 });
+      const t = setTimeout(() => { client.end(true); reject(new Error('timeout')); }, 9000);
       client.on('connect', () => { clearTimeout(t); resolve(client); });
       client.on('error',   ()  => { clearTimeout(t); client.end(true); reject(new Error('error')); });
     });
@@ -56,9 +58,10 @@ const MP = {
     if (typeof mqtt === 'undefined') throw new Error('mqtt library failed to load — try refreshing');
     let client = null;
     for (const url of MQTT_BROKERS) {
+      mpStatus(`Connecting… trying relay ${MQTT_BROKERS.indexOf(url) + 1}/${MQTT_BROKERS.length}`);
       try { client = await this._tryBroker(url); break; } catch { /* try next */ }
     }
-    if (!client) throw new Error('Could not reach relay — check your internet connection');
+    if (!client) throw new Error('Could not reach any relay server — check your internet connection');
     client.on('message', (topic, msg) => {
       try { onMsg(JSON.parse(msg.toString())); } catch { /* ignore malformed */ }
     });
