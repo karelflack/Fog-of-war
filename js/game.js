@@ -91,8 +91,8 @@ function applySettings() {
   C.CREDITS_PER_OILFIELD  = Math.round(4 * sm);
   C.ASSEMBLY_TIME   = Math.round(240000 / sm);
   C.SABOTAGE_DUR    = Math.round(120000 / sm);
-  const dm = { easy: 2.0, normal: 1.0, hard: 0.55 }[SETTINGS.difficulty];
-  C.AI_TICK = Math.round(20000 * dm);
+  const dm = { easy: 2.0, normal: 1.0, hard: 0.50 }[SETTINGS.difficulty];
+  C.AI_TICK = Math.round(6000 * dm);
 }
 
 function setSetting(key, val) {
@@ -1364,71 +1364,55 @@ function aiTick() {
   const ai = state.ai;
   const p  = state.player;
 
+  // Launch if ready
   if (ai.science >= 100 && ai.depletedUranium >= 100 && ai.silo && !ai.assembling && !ai.assemblyDone) {
     ai.startAssembly();
     log('⚠ INTEL: Enemy has initiated assembly!', 'danger');
-    return;
   }
 
-  const estPlayerSci = (ai.estimatedEnemySci.min + ai.estimatedEnemySci.max) / 2;
+  const estSci = (ai.estimatedEnemySci.min + ai.estimatedEnemySci.max) / 2;
 
-  // Build a lab if affordable and under cap
-  if (ai.credits >= nextLabCost(ai) + 80 && ai.labs.length < 8) {
-    aiBuild(); return;
+  // ── Building phase: up to 2 structures per tick ──────────────
+  let builds = 2;
+
+  // Labs — always build when affordable (no random gate)
+  if (builds > 0 && ai.credits >= nextLabCost(ai) && ai.labs.length < 12) {
+    aiBuild(); builds--;
+  }
+  // Reactors — high priority, minimal random gate
+  if (builds > 0 && ai.credits >= C.REACTOR_COST && ai.reactors.length < 5 && Math.random() < 0.80) {
+    aiBuildReactor(); builds--;
+  }
+  // Silo — build it as soon as possible, no random gate
+  if (builds > 0 && ai.credits >= C.SILO_COST && !ai.silo && ai.labs.length >= 2) {
+    aiBuildSilo(); builds--;
+  }
+  // Oil fields — good income, moderate chance
+  if (builds > 0 && ai.credits >= C.OILFIELD_COST && ai.oilFields.length < 5 && Math.random() < 0.65) {
+    aiBuildOilField(); builds--;
+  }
+  // Jammers
+  if (builds > 0 && ai.credits >= C.JAMMER_COST && ai.jammers.length < 6 && Math.random() < 0.60) {
+    aiPlaceJammer(); builds--;
+  }
+  // Defense systems
+  if (builds > 0 && ai.credits >= C.DEFENSE_COST && ai.defenses.length < C.DEFENSE_MAX && ai.labs.length >= 2 && Math.random() < 0.55) {
+    aiBuildDefense();
   }
 
-  // Build reactors (need uranium to win)
-  if (ai.credits >= C.REACTOR_COST + 200 && ai.reactors.length < 3 && Math.random() < 0.55) {
-    aiBuildReactor(); return;
-  }
+  // ── Operations phase: one op per tick ────────────────────────
+  const hasSaboTarget = ai.revealedEnemyJammers.length > 0 || ai.revealedEnemyDefenses.length > 0 ||
+                        ai.revealedEnemySilo || ai.revealedEnemyReactors.length > 0;
 
-  // Build silo (need it to win — wait until 2+ labs exist)
-  if (ai.credits >= C.SILO_COST + 200 && !ai.silo && ai.labs.length >= 2 && Math.random() < 0.65) {
-    aiBuildSilo(); return;
-  }
-
-  // Build oil fields (max 3, gives steady income)
-  if (ai.credits >= C.OILFIELD_COST + 200 && ai.oilFields.length < 3 && Math.random() < 0.45) {
-    aiBuildOilField(); return;
-  }
-
-  // Place a jammer (keep 300c buffer; max 4 jammers)
-  if (ai.credits >= C.JAMMER_COST + 300 && ai.jammers.length < 4 && Math.random() < 0.40) {
-    aiPlaceJammer(); return;
-  }
-
-  // Build a defense system (protect key areas; max DEFENSE_MAX)
-  if (ai.credits >= C.DEFENSE_COST + 200 && ai.defenses.length < C.DEFENSE_MAX && ai.labs.length >= 2 && Math.random() < 0.35) {
-    aiBuildDefense(); return;
-  }
-
-  // Sweep for player jammers
-  if (ai.credits >= C.SWEEP_COST && Math.random() < 0.22) {
-    aiSweep(); return;
-  }
-
-  // Destroy a revealed player jammer or defense
-  if ((ai.revealedEnemyJammers.length > 0 || ai.revealedEnemyDefenses.length > 0) && ai.credits >= OPS.SABOTAGE.cost && Math.random() < 0.75) {
-    aiOp('SABOTAGE'); return;
-  }
-
-  // Sabotage if significantly behind
-  if (ai.science < estPlayerSci - 20 && ai.credits >= OPS.SABOTAGE.cost && Math.random() < 0.55) {
-    aiOp('SABOTAGE'); return;
-  }
-
-  // Steal if behind
-  if (ai.science < estPlayerSci - 10 && ai.credits >= OPS.STEAL.cost && Math.random() < 0.60) {
-    aiOp('STEAL'); return;
-  }
-
-  // Random steal
-  if (ai.credits >= OPS.STEAL.cost && Math.random() < 0.35) {
-    aiOp('STEAL'); return;
-  }
-
-  // Random RECON
-  if (ai.credits >= OPS.RECON.cost && Math.random() < 0.30) {
+  if (ai.credits >= C.SWEEP_COST && Math.random() < 0.40) {
+    aiSweep();
+  } else if (hasSaboTarget && ai.credits >= OPS.SABOTAGE.cost && Math.random() < 0.88) {
+    aiOp('SABOTAGE');
+  } else if (ai.science < estSci - 15 && ai.credits >= OPS.SABOTAGE.cost && Math.random() < 0.70) {
+    aiOp('SABOTAGE');
+  } else if (ai.credits >= OPS.STEAL.cost && Math.random() < 0.55) {
+    aiOp('STEAL');
+  } else if (ai.credits >= OPS.RECON.cost && Math.random() < 0.50) {
     aiOp('RECON');
   }
 }
@@ -1960,9 +1944,10 @@ function init() {
   // Expose helpers for HTML onclick
   window.G = { enterBuildMode, enterJammerMode, enterReactorMode, enterSiloMode, enterOilFieldMode, enterDefenseMode, selectOp, startAssembly, doSweep };
 
-  // Give AI an initial lab after a short delay
+  // Give AI a head-start
   setTimeout(() => { if (!state.gameOver) aiBuild(); }, 1500);
-  setTimeout(() => { if (!state.gameOver && state.ai.credits >= nextLabCost(state.ai)) aiBuild(); }, 6000);
+  setTimeout(() => { if (!state.gameOver) aiBuild(); }, 5000);
+  setTimeout(() => { if (!state.gameOver) aiBuildReactor(); }, 12000);
 
   log('War Room online. Build labs, reactors, and a rocket silo.', 'imp');
   log('100% science + 100% uranium + silo → assembly → ICBM launch → victory.', '');
