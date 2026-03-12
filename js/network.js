@@ -205,6 +205,23 @@ function handleNetMsg(msg) {
       def.id = data.id; state.ai.defenses.push(def);
       break;
     }
+    case 'BUILD_TOWER': {
+      if (!state.ai) break;
+      const tw = new RadioTower(data.lat, data.lon, REGIONS[data.regionId] || null, 'ai');
+      tw.id = data.id; state.ai.towers.push(tw);
+      break;
+    }
+    case 'LAUNCH_SATELLITE': {
+      if (!state.ai) break;
+      const norm = new THREE.Vector3(data.nx, data.ny, data.nz);
+      const sat = new Satellite(norm, data.phase);
+      sat.marker    = createSatelliteMarker(false);
+      sat.orbitRing = createOrbitRing(norm, false);
+      sat.groundDot = createGroundDot(false);
+      const lastTower = state.ai.towers[state.ai.towers.length - 1];
+      if (lastTower) lastTower.satellite = sat;
+      break;
+    }
 
     case 'LAUNCH_OP':     resolveRemoteOp(data); break;
     case 'OP_RESULT':     applyOpResult(data);   break;

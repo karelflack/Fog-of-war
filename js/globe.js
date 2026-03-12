@@ -1071,10 +1071,14 @@ const clock = new THREE.Clock();
 
   if (typeof update !== 'undefined') update();
   // Update satellite marker positions each frame
-  const _ps = typeof state !== 'undefined' ? state.player?.satellite : null;
-  const _as = typeof state !== 'undefined' ? state.ai?.satellite    : null;
-  if (_ps?.active && _ps.marker) updateSatelliteMarker(_ps);
-  if (_as?.active && _as.marker) updateSatelliteMarker(_as);
+  if (typeof state !== 'undefined') {
+    for (const _t of (state.player?.towers || [])) {
+      if (_t.satellite?.active && _t.satellite.marker) updateSatelliteMarker(_t.satellite);
+    }
+    for (const _t of (state.ai?.towers || [])) {
+      if (_t.satellite?.active && _t.satellite.marker) updateSatelliteMarker(_t.satellite);
+    }
+  }
   renderer.render(scene, camera);
 })();
 
