@@ -434,6 +434,127 @@ function removeDefenseRadiusRing(ring) {
   ring.geometry.dispose();
 }
 
+// ── Satellite system visuals ──────────────────────────────────
+
+function createRadioTowerMarker(tower, isPlayer) {
+  const col = isPlayer ? 0x44aaff : 0xff6644;
+  const g = new THREE.Group();
+  const base = mkPart(new THREE.CylinderGeometry(0.013, 0.017, 0.005, 8), 0x223344);
+  base.position.set(0, 0.0025, 0);
+  const mast = mkPart(new THREE.CylinderGeometry(0.003, 0.004, 0.048, 6), 0x334455);
+  mast.position.set(0, 0.027, 0);
+  const dish = mkPart(new THREE.SphereGeometry(0.015, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), col, col);
+  dish.position.set(0.008, 0.056, 0.004);
+  dish.rotation.z = -0.6;
+  const tip = mkPart(new THREE.SphereGeometry(0.003, 5, 4), col, col);
+  tip.position.set(0, 0.052, 0);
+  g.add(base, mast, dish, tip);
+  placeGroup(g, tower.lat, tower.lon);
+  MARKERS.add(g);
+  tower.marker = g;
+  return g;
+}
+
+function createSatelliteMarker(isPlayer) {
+  const panelCol = isPlayer ? 0x2255cc : 0xcc2222;
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(0.026, 0.016, 0.016),
+    new THREE.MeshPhongMaterial({ color: 0x8899aa, emissive: 0x223344, emissiveIntensity: 0.5 })
+  );
+  const panelMat = new THREE.MeshPhongMaterial({ color: panelCol, emissive: panelCol, emissiveIntensity: 0.5 });
+  const lp = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.002, 0.016), panelMat);
+  lp.position.set(-0.030, 0, 0);
+  const rp = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.002, 0.016), panelMat);
+  rp.position.set(0.030, 0, 0);
+  const dish = new THREE.Mesh(
+    new THREE.SphereGeometry(0.007, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshPhongMaterial({ color: 0xccddee, emissive: 0x445566, emissiveIntensity: 0.4 })
+  );
+  dish.position.set(0, -0.012, 0);
+  dish.rotation.x = Math.PI;
+  g.add(body, lp, rp, dish);
+  G_GROUP.add(g);
+  return g;
+}
+
+function getSatellitePos(sat) {
+  const N = sat.orbitNormal;
+  const arb = Math.abs(N.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  const u = new THREE.Vector3().crossVectors(N, arb).normalize();
+  const v = new THREE.Vector3().crossVectors(N, u).normalize();
+  const r = (typeof C !== 'undefined' && C.SATELLITE_ORBIT_RADIUS) || 1.10;
+  return new THREE.Vector3()
+    .addScaledVector(u, Math.cos(sat.phase))
+    .addScaledVector(v, Math.sin(sat.phase))
+    .multiplyScalar(r);
+}
+
+function updateSatelliteMarker(sat) {
+  if (!sat.marker) return;
+  const pos = getSatellitePos(sat);
+  sat.marker.position.copy(pos);
+  // Orient so solar panels face perpendicular to velocity
+  const N = sat.orbitNormal;
+  const arb = Math.abs(N.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  const u = new THREE.Vector3().crossVectors(N, arb).normalize();
+  const v = new THREE.Vector3().crossVectors(N, u).normalize();
+  const tangent = new THREE.Vector3()
+    .addScaledVector(u, -Math.sin(sat.phase))
+    .addScaledVector(v,  Math.cos(sat.phase))
+    .normalize();
+  sat.marker.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), tangent);
+  // Update ground track dot
+  if (sat.groundDot) {
+    sat.groundDot.position.copy(pos.clone().normalize().multiplyScalar(1.003));
+  }
+}
+
+function createOrbitRing(orbitNormal, isPlayer) {
+  const N = orbitNormal;
+  const arb = Math.abs(N.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  const u = new THREE.Vector3().crossVectors(N, arb).normalize();
+  const v = new THREE.Vector3().crossVectors(N, u).normalize();
+  const r = (typeof C !== 'undefined' && C.SATELLITE_ORBIT_RADIUS) || 1.10;
+  const pts = [];
+  for (let i = 0; i <= 128; i++) {
+    const t = (i / 128) * Math.PI * 2;
+    pts.push(new THREE.Vector3().addScaledVector(u, Math.cos(t)).addScaledVector(v, Math.sin(t)).multiplyScalar(r));
+  }
+  const ring = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: isPlayer ? 0x4499ff : 0xff5533, transparent: true, opacity: 0.22 })
+  );
+  G_GROUP.add(ring);
+  return ring;
+}
+
+function createGroundDot(isPlayer) {
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.006, 6, 6),
+    new THREE.MeshBasicMaterial({ color: isPlayer ? 0x44aaff : 0xff6644, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending })
+  );
+  G_GROUP.add(dot);
+  return dot;
+}
+
+function removeSatelliteVisuals(sat) {
+  if (sat.marker)    { G_GROUP.remove(sat.marker);    sat.marker    = null; }
+  if (sat.orbitRing) { G_GROUP.remove(sat.orbitRing); sat.orbitRing = null; }
+  if (sat.groundDot) { G_GROUP.remove(sat.groundDot); sat.groundDot = null; }
+}
+
+function createOrbitPointDot(lat, lon) {
+  const m = new THREE.Mesh(
+    new THREE.SphereGeometry(0.009, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0x44aaff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending })
+  );
+  m.position.copy(ll2v3(lat, lon, 1.005));
+  G_GROUP.add(m);
+  return m;
+}
+
 // Set all child mesh colours — used for active/sabotaged state
 function setMarkerEnabled(marker, enabled) {
   if (!marker) return;
@@ -949,6 +1070,11 @@ const clock = new THREE.Clock();
   });
 
   if (typeof update !== 'undefined') update();
+  // Update satellite marker positions each frame
+  const _ps = typeof state !== 'undefined' ? state.player?.satellite : null;
+  const _as = typeof state !== 'undefined' ? state.ai?.satellite    : null;
+  if (_ps?.active && _ps.marker) updateSatelliteMarker(_ps);
+  if (_as?.active && _as.marker) updateSatelliteMarker(_as);
   renderer.render(scene, camera);
 })();
 

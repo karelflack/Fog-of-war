@@ -46,6 +46,7 @@
         <li><b>Oil Field (600c)</b> — Generates +4c/s passive income. Makes you a STEAL target — protect with jammers. Locate and drain enemy oil fields using RECON then STEAL.</li>
         <li><b>Jammer (600c)</b> — Dual-purpose: near your labs it penalises enemy operations (−28% success). Near enemy labs it slows their science by 50%. Enemy jammers are hidden until swept or reconed.</li>
         <li><b>Defense System (800c)</b> — Creates a no-build zone: the enemy cannot construct anything within its radius (~1750 km). Hidden from the enemy until found by RECON or SWEEP. SABOTAGE it to clear the zone. Max 3 per player.</li>
+        <li><b>Radio Tower (900c)</b> — Places a radio tower that controls a satellite. After placing, click 2 points on the globe to set the orbit. The satellite orbits continuously (~4 min/lap) and passively scans a ~780km radius below it every 30s, revealing enemy structures. RECON or SWEEP to find the enemy's tower, then SABOTAGE it to knock out their satellite. One per player.</li>
       </ul>
     </div>
 
@@ -271,6 +272,9 @@
   </button>
   <button class="btn" id="btn-defense" onclick="G.enterDefenseMode()">
     Defense System<br><span class="cost-tag">800c — denies enemy construction</span>
+  </button>
+  <button class="btn" id="btn-tower" onclick="G.enterTowerMode()">
+    Radio Tower<br><span class="cost-tag">900c — satellite + passive scan</span>
   </button>
   <div class="sec-info" id="sl-labs">Labs: 0 · Jammers: 0</div>
   <div class="sec-info" id="sl-detail" style="margin-top:4px"></div>

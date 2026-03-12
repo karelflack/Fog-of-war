@@ -26,6 +26,11 @@ const C = {
   DEFENSE_COST:          800,
   DEFENSE_RADIUS:        0.28,   // chord distance on unit sphere ≈ ~1750 km
   DEFENSE_MAX:           3,
+  TOWER_COST:               900,
+  SATELLITE_ORBIT_RADIUS:   1.10,
+  SATELLITE_SPEED:          0.0000262, // rad/ms → ~4 min/orbit
+  SATELLITE_SCAN_RADIUS:    0.12,      // chord ≈ 780 km
+  SATELLITE_SCAN_INTERVAL:  30000,     // ms between scans
 };
 
 // Nation capitals for ICBM targeting
@@ -263,6 +268,26 @@ class Defense {
   }
 }
 
+class RadioTower {
+  constructor(lat, lon, region, ownerId) {
+    this.id = uid(); this.lat = lat; this.lon = lon;
+    this.region = region; this.ownerId = ownerId; this.marker = null;
+  }
+}
+
+class Satellite {
+  constructor(orbitNormal, phase = 0) {
+    this.id       = uid();
+    this.orbitNormal = orbitNormal; // THREE.Vector3
+    this.phase    = phase;
+    this.lastScan = 0;
+    this.active   = true;
+    this.marker   = null;
+    this.orbitRing = null;
+    this.groundDot = null;
+  }
+}
+
 class Player {
   constructor(id, isHuman) {
     this.id = id;
@@ -278,6 +303,9 @@ class Player {
     this.depletedUranium = 0;
     this.oilFields = [];
     this.defenses = [];
+    this.tower    = null;
+    this.satellite = null;
+    this.revealedEnemyTowers = [];
     this.revealedEnemyOilFields = [];
     this.revealedEnemyJammers = [];
     this.revealedEnemyReactors = [];
@@ -329,6 +357,10 @@ const state = {
   siloMode:     false,
   oilFieldMode: false,
   defenseMode:  false,
+  towerMode:       false,
+  orbitSelectMode: false,
+  orbitPoint1:     null,
+  orbitPoint1Dot:  null,
   pendingOp:    null,
   lastUpdate:   0,
   lastAiTick:   0,
@@ -415,6 +447,41 @@ function update() {
   if (!MP.active && now - state.lastAiTick > C.AI_TICK) {
     state.lastAiTick = now;
     aiTick();
+  }
+
+  // Advance satellite orbits
+  if (state.player.satellite?.active) {
+    const sat = state.player.satellite;
+    sat.phase = (sat.phase + C.SATELLITE_SPEED * dt * 1000) % (Math.PI * 2);
+    if (now - sat.lastScan >= C.SATELLITE_SCAN_INTERVAL) {
+      sat.lastScan = now;
+      doSatelliteScan(sat);
+    }
+  }
+  // Advance AI satellite (single-player — AI satellite scans player structures)
+  if (!MP.active && state.ai.satellite?.active) {
+    const sat = state.ai.satellite;
+    sat.phase = (sat.phase + C.SATELLITE_SPEED * dt * 1000) % (Math.PI * 2);
+    if (now - sat.lastScan >= C.SATELLITE_SCAN_INTERVAL) {
+      sat.lastScan = now;
+      // AI satellite scans player structures
+      const groundPos = getSatellitePos(sat).normalize();
+      const sr = C.SATELLITE_SCAN_RADIUS;
+      for (const j of state.player.jammers) {
+        if (state.ai.revealedEnemyJammers.some(x => x.id === j.id)) continue;
+        if (groundPos.distanceTo(ll2v3(j.lat, j.lon, 1.0).normalize()) <= sr)
+          state.ai.revealedEnemyJammers.push(j);
+      }
+      for (const r of state.player.reactors) {
+        if (state.ai.revealedEnemyReactors.some(x => x.id === r.id)) continue;
+        if (groundPos.distanceTo(ll2v3(r.lat, r.lon, 1.0).normalize()) <= sr)
+          state.ai.revealedEnemyReactors.push(r);
+      }
+      if (!state.ai.revealedEnemySilo && state.player.silo) {
+        if (groundPos.distanceTo(ll2v3(state.player.silo.lat, state.player.silo.lon, 1.0).normalize()) <= sr)
+          state.ai.revealedEnemySilo = state.player.silo;
+      }
+    }
   }
 
   // Fuzzy drift of enemy science estimate (single-player only — MP uses SYNC)
@@ -521,6 +588,12 @@ function updateUI() {
   for (const d of p.defenses) {
     detailLines.push(`• Defense ${d.region ? d.region.name.split(' ')[0] : '?'} — area denial`);
   }
+  if (p.tower) {
+    detailLines.push(`• Radio Tower ${p.tower.region ? p.tower.region.name.split(' ')[0] : '?'} ✓`);
+  }
+  if (p.satellite?.active) {
+    detailLines.push(`• Satellite — orbiting`);
+  }
   document.getElementById('sl-detail').textContent = detailLines.join('\n');
 
   // Button states
@@ -534,6 +607,7 @@ function updateUI() {
   document.getElementById('btn-oilfield').disabled = p.credits < oilCost;
   document.getElementById('btn-oilfield-cost').textContent = `${oilCost}c — +${C.CREDITS_PER_OILFIELD}c/s · STEAL target`;
   document.getElementById('btn-defense').disabled  = p.credits < C.DEFENSE_COST || p.defenses.length >= C.DEFENSE_MAX;
+  document.getElementById('btn-tower').disabled = p.credits < C.TOWER_COST || !!p.tower;
   document.getElementById('btn-recon').disabled    = p.credits < OPS.RECON.cost;
   document.getElementById('btn-steal').disabled    = p.credits < OPS.STEAL.cost;
   document.getElementById('btn-sabotage').disabled = p.credits < OPS.SABOTAGE.cost;
@@ -560,7 +634,8 @@ function updateUI() {
   const oilFieldIntel   = p.revealedEnemyOilFields;
   const defenseIntel    = p.revealedEnemyDefenses;
   const intelEl         = document.getElementById('sr-intel');
-  const hasIntel = intel.length || jammerIntel.length || reactorIntel.length || siloIntel || oilFieldIntel.length || defenseIntel.length;
+  const towerIntel = p.revealedEnemyTowers;
+  const hasIntel = intel.length || jammerIntel.length || reactorIntel.length || siloIntel || oilFieldIntel.length || defenseIntel.length || towerIntel.length;
   if (!hasIntel) {
     intelEl.textContent = 'No intel. Use RECON or SWEEP to gather data.';
   } else {
@@ -592,6 +667,11 @@ function updateUI() {
       if (txt) txt += '\n';
       txt += `${defenseIntel.length} defense system(s) located:\n` +
         defenseIntel.map(d => `• ${d.region ? d.region.name : '?'} (${d.lat.toFixed(0)}°, ${d.lon.toFixed(0)}°) ← SABOTAGE`).join('\n');
+    }
+    if (towerIntel.length) {
+      if (txt) txt += '\n';
+      txt += `${towerIntel.length} radio tower(s) located:\n` +
+        towerIntel.map(t => `• ${t.region ? t.region.name : '?'} (${t.lat.toFixed(0)}°, ${t.lon.toFixed(0)}°) ← SABOTAGE`).join('\n');
     }
     intelEl.textContent = txt;
   }
@@ -629,6 +709,8 @@ function handleClick(e) {
     }
   }
 
+  if (state.towerMode)       { doBuildTower(lat, lon, region); exitTowerMode(); return; }
+  if (state.orbitSelectMode) { doOrbitSelect(lat, lon); return; }
   if (state.siloMode)     { doBuildSilo(lat, lon, region);     exitSiloMode();     return; }
   if (state.reactorMode)  { doBuildReactor(lat, lon, region);  exitReactorMode();  return; }
   if (state.jammerMode)   { doBuildJammer(lat, lon, region);   exitJammerMode();   return; }
@@ -732,7 +814,7 @@ document.addEventListener('mousedown', e => {
 function enterBuildMode() {
   const cost = nextLabCost(state.player);
   if (state.player.credits < cost) { toast(`Need ${cost}c to build a lab`); return; }
-  exitJammerMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode(); exitDefenseMode();
+  exitJammerMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode(); exitDefenseMode(); exitTowerMode(); exitOrbitSelect();
   state.buildMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -782,7 +864,7 @@ function doBuildLab(lat, lon, region) {
 // ═══════════════════════════════════════════════════════════════
 function enterJammerMode() {
   if (state.player.credits < C.JAMMER_COST) { toast(`Need ${C.JAMMER_COST}c to deploy jammer`); return; }
-  exitBuildMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode(); exitDefenseMode();
+  exitBuildMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode(); exitDefenseMode(); exitTowerMode(); exitOrbitSelect();
   state.jammerMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -817,7 +899,7 @@ function doBuildJammer(lat, lon, region) {
 // ═══════════════════════════════════════════════════════════════
 function enterReactorMode() {
   if (state.player.credits < C.REACTOR_COST) { toast(`Need ${C.REACTOR_COST}c to build reactor`); return; }
-  exitBuildMode(); exitJammerMode(); exitSiloMode(); exitOilFieldMode(); exitDefenseMode();
+  exitBuildMode(); exitJammerMode(); exitSiloMode(); exitOilFieldMode(); exitDefenseMode(); exitTowerMode(); exitOrbitSelect();
   state.reactorMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -854,7 +936,7 @@ function enterSiloMode() {
   const p = state.player;
   if (p.credits < C.SILO_COST) { toast(`Need ${C.SILO_COST}c to build silo`); return; }
   if (p.silo) { toast('You already have a rocket silo!'); return; }
-  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitOilFieldMode(); exitDefenseMode();
+  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitOilFieldMode(); exitDefenseMode(); exitTowerMode(); exitOrbitSelect();
   state.siloMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -891,7 +973,7 @@ function doBuildSilo(lat, lon, region) {
 function enterOilFieldMode() {
   const cost = nextOilFieldCost(state.player);
   if (state.player.credits < cost) { toast(`Need ${cost}c to build oil field`); return; }
-  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitSiloMode(); exitDefenseMode();
+  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitSiloMode(); exitDefenseMode(); exitTowerMode(); exitOrbitSelect();
   state.oilFieldMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -928,7 +1010,7 @@ function enterDefenseMode() {
   const p = state.player;
   if (p.credits < C.DEFENSE_COST) { toast(`Need ${C.DEFENSE_COST}c to build defense system`); return; }
   if (p.defenses.length >= C.DEFENSE_MAX) { toast(`Defense limit reached (max ${C.DEFENSE_MAX})`); return; }
-  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode();
+  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode(); exitTowerMode(); exitOrbitSelect();
   state.defenseMode = true;
   state.pendingOp = null;
   clearOpBtns();
@@ -955,6 +1037,152 @@ function doBuildDefense(lat, lon, region) {
   toast('Defense system active! Enemy cannot build within its radius.');
   if (MP.active) MP.send('BUILD_DEFENSE', { id: defense.id, lat, lon, regionId: region?.id || null });
   updateUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RADIO TOWER + SATELLITE
+// ═══════════════════════════════════════════════════════════════
+function enterTowerMode() {
+  const p = state.player;
+  if (p.credits < C.TOWER_COST) { toast(`Need ${C.TOWER_COST}c for radio tower`); return; }
+  if (p.tower) { toast('You already have a radio tower!'); return; }
+  exitBuildMode(); exitJammerMode(); exitReactorMode(); exitSiloMode(); exitOilFieldMode(); exitDefenseMode();
+  state.towerMode  = true;
+  state.pendingOp  = null;
+  clearOpBtns();
+  showTargetInd(`Click globe to place radio tower (${C.TOWER_COST}c) — ESC to cancel`);
+  document.getElementById('btn-tower').classList.add('active');
+}
+
+function exitTowerMode() {
+  state.towerMode = false;
+  document.getElementById('btn-tower')?.classList.remove('active');
+  if (!state.buildMode && !state.jammerMode && !state.reactorMode && !state.siloMode &&
+      !state.oilFieldMode && !state.defenseMode && !state.orbitSelectMode && !state.pendingOp) hideTargetInd();
+}
+
+function doBuildTower(lat, lon, region) {
+  const p = state.player;
+  if (p.credits < C.TOWER_COST) { toast('Not enough credits!'); return; }
+  if (p.tower) { toast('Already have a radio tower!'); return; }
+  if (!isOnLand(lat, lon)) { toast('Tower must be on land!'); return; }
+  p.credits -= C.TOWER_COST;
+  const tower = new RadioTower(lat, lon, region, 'player');
+  p.tower = tower;
+  createRadioTowerMarker(tower, true);
+  log(`Radio tower built in ${region ? region.name : 'unknown'} — select satellite orbit`, 'ok');
+  toast('Tower placed! Click 2 points on the globe to set the orbit.');
+  if (MP.active) MP.send('BUILD_TOWER', { id: tower.id, lat, lon, regionId: region?.id || null });
+  startOrbitSelect();
+  updateUI();
+}
+
+function startOrbitSelect() {
+  state.orbitSelectMode = true;
+  state.orbitPoint1 = null;
+  if (state.orbitPoint1Dot) { G_GROUP.remove(state.orbitPoint1Dot); state.orbitPoint1Dot = null; }
+  showTargetInd('Orbit setup: click point 1 on globe to define orbit path');
+}
+
+function exitOrbitSelect() {
+  state.orbitSelectMode = false;
+  state.orbitPoint1 = null;
+  if (state.orbitPoint1Dot) { G_GROUP.remove(state.orbitPoint1Dot); state.orbitPoint1Dot = null; }
+  if (!state.buildMode && !state.jammerMode && !state.reactorMode && !state.siloMode &&
+      !state.oilFieldMode && !state.defenseMode && !state.towerMode && !state.pendingOp) hideTargetInd();
+}
+
+function doOrbitSelect(lat, lon) {
+  if (!state.orbitPoint1) {
+    state.orbitPoint1 = { lat, lon };
+    state.orbitPoint1Dot = createOrbitPointDot(lat, lon);
+    showTargetInd('Orbit setup: click point 2 on globe to launch satellite');
+  } else {
+    const p1v = ll2v3(state.orbitPoint1.lat, state.orbitPoint1.lon, 1.0).normalize();
+    const p2v = ll2v3(lat, lon, 1.0).normalize();
+    const normal = new THREE.Vector3().crossVectors(p1v, p2v);
+    if (normal.length() < 0.05) {
+      toast('Points too close together — pick a more distant second point'); return;
+    }
+    normal.normalize();
+    launchSatellite(normal);
+    exitOrbitSelect();
+  }
+}
+
+function launchSatellite(orbitNormal) {
+  const p = state.player;
+  const sat = new Satellite(orbitNormal, Math.random() * Math.PI * 2);
+  p.satellite = sat;
+  sat.marker    = createSatelliteMarker(true);
+  sat.orbitRing = createOrbitRing(orbitNormal, true);
+  sat.groundDot = createGroundDot(true);
+  SFX.buildLab();
+  log('Satellite launched! It will scan for enemy structures as it orbits.', 'ok');
+  toast('Satellite in orbit! It pings enemy buildings as it passes over.');
+  if (MP.active) MP.send('LAUNCH_SATELLITE', {
+    nx: orbitNormal.x, ny: orbitNormal.y, nz: orbitNormal.z, phase: sat.phase
+  });
+  updateUI();
+}
+
+function doSatelliteScan(sat) {
+  if (!state.player?.tower || !state.ai || state.gameOver) return;
+  const groundPos = getSatellitePos(sat).normalize();
+  let found = 0;
+  const sr = C.SATELLITE_SCAN_RADIUS;
+
+  for (const lab of state.ai.labs) {
+    if (state.player.revealedEnemyLabs.some(r => r.lab.id === lab.id)) continue;
+    if (groundPos.distanceTo(ll2v3(lab.lat, lab.lon, 1.0).normalize()) <= sr) {
+      state.player.revealedEnemyLabs.push({ lab }); createLabMarker(lab, false);
+      if (lab.region) state.player.knownEnemyRegions.add(lab.region.id); found++;
+    }
+  }
+  for (const j of state.ai.jammers) {
+    if (state.player.revealedEnemyJammers.some(x => x.id === j.id)) continue;
+    if (groundPos.distanceTo(ll2v3(j.lat, j.lon, 1.0).normalize()) <= sr) {
+      state.player.revealedEnemyJammers.push(j); createJammerMarker(j, false); found++;
+    }
+  }
+  for (const r of state.ai.reactors) {
+    if (state.player.revealedEnemyReactors.some(x => x.id === r.id)) continue;
+    if (groundPos.distanceTo(ll2v3(r.lat, r.lon, 1.0).normalize()) <= sr) {
+      state.player.revealedEnemyReactors.push(r); createReactorMarker(r, false); found++;
+    }
+  }
+  for (const of_ of state.ai.oilFields) {
+    if (state.player.revealedEnemyOilFields.some(x => x.id === of_.id)) continue;
+    if (groundPos.distanceTo(ll2v3(of_.lat, of_.lon, 1.0).normalize()) <= sr) {
+      state.player.revealedEnemyOilFields.push(of_); createOilFieldMarker(of_, false); found++;
+    }
+  }
+  for (const d of state.ai.defenses) {
+    if (state.player.revealedEnemyDefenses.some(x => x.id === d.id)) continue;
+    if (groundPos.distanceTo(ll2v3(d.lat, d.lon, 1.0).normalize()) <= sr) {
+      state.player.revealedEnemyDefenses.push(d); createDefenseMarker(d, false); found++;
+    }
+  }
+  if (!state.player.revealedEnemySilo && state.ai.silo) {
+    if (groundPos.distanceTo(ll2v3(state.ai.silo.lat, state.ai.silo.lon, 1.0).normalize()) <= sr) {
+      state.player.revealedEnemySilo = state.ai.silo; createSiloMarker(state.ai.silo, false);
+      log('SATELLITE: Enemy missile silo detected!', 'ok'); found++;
+    }
+  }
+  if (state.ai.tower && !state.player.revealedEnemyTowers.some(x => x.id === state.ai.tower.id)) {
+    if (groundPos.distanceTo(ll2v3(state.ai.tower.lat, state.ai.tower.lon, 1.0).normalize()) <= sr) {
+      state.player.revealedEnemyTowers.push(state.ai.tower); createRadioTowerMarker(state.ai.tower, false);
+      log('SATELLITE: Enemy radio tower detected!', 'ok'); found++;
+    }
+  }
+
+  if (found > 0) {
+    const { lat: gLat, lon: gLon } = v3ToLL(groundPos);
+    spawnSearchPulse(gLat, gLon);
+    log(`SATELLITE: ${found} enemy structure(s) detected!`, 'ok');
+    toast(`Satellite found ${found} enemy structure(s)!`);
+    refreshFogMarkers(); updateUI();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1000,6 +1228,11 @@ function doSweep() {
       if (p.revealedEnemyDefenses.some(x => x.id === d.id)) continue;
       if (sv.distanceTo(ll2v3(d.lat, d.lon)) <= C.SWEEP_RADIUS) {
         p.revealedEnemyDefenses.push(d); createDefenseMarker(d, false); found++;
+      }
+    }
+    if (state.ai.tower && !p.revealedEnemyTowers.some(x => x.id === state.ai.tower.id)) {
+      if (sv.distanceTo(ll2v3(state.ai.tower.lat, state.ai.tower.lon)) <= C.SWEEP_RADIUS) {
+        p.revealedEnemyTowers.push(state.ai.tower); createRadioTowerMarker(state.ai.tower, false); found++;
       }
     }
   }
@@ -1155,6 +1388,14 @@ function resolveOp(op, attacker, defender) {
         log('RECON: Enemy defense system located! SABOTAGE to neutralise it!', 'ok');
       }
 
+      if (defender.tower && !attacker.revealedEnemyTowers.some(x => x.id === defender.tower.id)) {
+        if (origin.distanceTo(ll2v3(defender.tower.lat, defender.tower.lon)) <= C.RECON_RADIUS) {
+          attacker.revealedEnemyTowers.push(defender.tower);
+          createRadioTowerMarker(defender.tower, false);
+          log('RECON: Enemy radio tower located! SABOTAGE it to disable their satellite!', 'ok');
+        }
+      }
+
       const hidden = jammersFound.length + reactorsFound.length + oilFieldsFound.length + defensesFound.length;
       if (hidden > 0)
         log(`RECON: Detected ${hidden} enemy hidden structure(s)!`, 'ok');
@@ -1273,6 +1514,14 @@ function resolveOp(op, attacker, defender) {
       if (d.ownerId === defender.id)
         candidates.push({ kind: 'defense', obj: d, dist: t3.distanceTo(ll2v3(d.lat, d.lon)) });
     }
+    if (attacker === state.player) {
+      for (const t of attacker.revealedEnemyTowers) {
+        if (t.ownerId === defender.id)
+          candidates.push({ kind: 'tower', obj: t, dist: t3.distanceTo(ll2v3(t.lat, t.lon)) });
+      }
+    } else if (defender.tower) {
+      candidates.push({ kind: 'tower', obj: defender.tower, dist: t3.distanceTo(ll2v3(defender.tower.lat, defender.tower.lon)) });
+    }
 
     candidates.sort((a, b) => a.dist - b.dist);
     const hit = candidates.length > 0 && candidates[0].dist < 0.55 ? candidates[0] : null;
@@ -1345,6 +1594,18 @@ function resolveOp(op, attacker, defender) {
       attacker.revealedEnemyDefenses    = attacker.revealedEnemyDefenses.filter(x => x.id !== d.id);
       if (attacker === state.player) { SFX.opSuccess(); log('SABOTAGE SUCCESS: Enemy defense system destroyed! Zone cleared.', 'ok'); toast('Enemy defense system neutralised!'); }
       else { SFX.destroyed(); log('⚠ Your defense system was destroyed!', 'danger'); toast('Your defense system was destroyed!'); }
+
+    } else if (hit.kind === 'tower') {
+      const t = hit.obj;
+      if (t.marker) { MARKERS.remove(t.marker); t.marker = null; }
+      if (defender.satellite) { removeSatelliteVisuals(defender.satellite); defender.satellite.active = false; }
+      defender.tower = null;
+      if (attacker === state.player) {
+        attacker.revealedEnemyTowers = attacker.revealedEnemyTowers.filter(x => x.id !== t.id);
+        SFX.opSuccess(); log('SABOTAGE SUCCESS: Enemy radio tower destroyed! Their satellite is offline.', 'ok'); toast('Enemy satellite offline!');
+      } else {
+        SFX.destroyed(); log('Your radio tower was destroyed! Satellite offline!', 'danger'); toast('Your satellite is offline!');
+      }
     }
   }
 
@@ -1398,6 +1659,10 @@ function aiTick() {
   // Defense systems
   if (builds > 0 && ai.credits >= C.DEFENSE_COST && ai.defenses.length < C.DEFENSE_MAX && ai.labs.length >= 2 && Math.random() < 0.55) {
     aiBuildDefense();
+  }
+  // Build radio tower + satellite
+  if (builds > 0 && ai.credits >= C.TOWER_COST && !ai.tower && ai.labs.length >= 3 && Math.random() < 0.55) {
+    aiBuildTower(); builds--;
   }
 
   // ── Operations phase: one op per tick ────────────────────────
@@ -1555,6 +1820,30 @@ function aiBuildDefense() {
   const defense = new Defense(lat, lon, region, 'ai');
   ai.defenses.push(defense);
   console.log(`[AI] Defense system built in ${region ? region.name : '?'}`);
+}
+
+function aiBuildTower() {
+  const ai = state.ai;
+  if (ai.credits < C.TOWER_COST || ai.tower) return;
+  let lat, lon, region, attempts = 0;
+  do {
+    const keys = Object.keys(REGIONS);
+    region = REGIONS[keys[Math.floor(Math.random() * keys.length)]];
+    ({ lat, lon } = randInRegion(region));
+    attempts++;
+  } while (!isOnLand(lat, lon) && attempts < 30);
+  if (!isOnLand(lat, lon)) return;
+  ai.credits -= C.TOWER_COST;
+  ai.tower = new RadioTower(lat, lon, region, 'ai');
+  // AI auto-sets a random orbit
+  const orbitNormal = new THREE.Vector3(
+    Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5
+  ).normalize();
+  ai.satellite = new Satellite(orbitNormal, Math.random() * Math.PI * 2);
+  ai.satellite.marker    = createSatelliteMarker(false);
+  ai.satellite.orbitRing = createOrbitRing(orbitNormal, false);
+  ai.satellite.groundDot = createGroundDot(false);
+  console.log('[AI] Radio tower + satellite launched');
 }
 
 function aiPlaceJammer() {
@@ -1835,6 +2124,8 @@ function endGame(playerWon) {
   for (const d of state.ai.defenses) {
     if (!state.player.revealedEnemyDefenses.some(x => x.id === d.id)) createDefenseMarker(d, false);
   }
+  if (state.ai.tower && !state.player.revealedEnemyTowers.some(x => x.id === state.ai.tower.id))
+    createRadioTowerMarker(state.ai.tower, false);
 
   for (const m of fogMarkers) MARKERS.remove(m);
   fogMarkers.length = 0;
@@ -1926,6 +2217,8 @@ document.addEventListener('keydown', e => {
     exitSiloMode();
     exitOilFieldMode();
     exitDefenseMode();
+    exitTowerMode();
+    exitOrbitSelect();
     state.pendingOp = null;
     clearOpBtns();
     closeCtx();
@@ -1942,7 +2235,7 @@ function init() {
   state.lastAiTick = Date.now();
 
   // Expose helpers for HTML onclick
-  window.G = { enterBuildMode, enterJammerMode, enterReactorMode, enterSiloMode, enterOilFieldMode, enterDefenseMode, selectOp, startAssembly, doSweep };
+  window.G = { enterBuildMode, enterJammerMode, enterReactorMode, enterSiloMode, enterOilFieldMode, enterDefenseMode, enterTowerMode, selectOp, startAssembly, doSweep };
 
   // Give AI a head-start
   setTimeout(() => { if (!state.gameOver) aiBuild(); }, 1500);
